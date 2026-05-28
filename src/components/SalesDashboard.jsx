@@ -22,10 +22,6 @@ export default function SalesDashboard({ records, onAddRecord, activeTab }) {
     setError(''); setSuccess('');
     const trimmed = text.trim();
     if (!trimmed) { setError('Order cannot be empty.'); return; }
-    if (!/^[a-zA-Z0-9\s]+$/.test(trimmed)) {
-      setError('Only letters, numbers, and spaces are allowed.');
-      return;
-    }
     onAddRecord({ datetime: formatDateTime(), order: trimmed, status: 'pending' });
     setText('');
     setSuccess('Order added successfully!');
@@ -53,7 +49,7 @@ export default function SalesDashboard({ records, onAddRecord, activeTab }) {
             </div>
           </form>
           <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.6rem' }}>
-            ℹ️ Letters, numbers and spaces only.
+            ℹ️ Enter details like item name, quantities, or prices.
           </p>
         </div>
       )}
