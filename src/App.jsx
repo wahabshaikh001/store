@@ -4,6 +4,7 @@ import Login from './components/Login';
 import Navbar from './components/Navbar';
 import SalesDashboard from './components/SalesDashboard';
 import AdminDashboard from './components/AdminDashboard';
+import ProductsSection from './components/ProductsSection';
 import ChangePasswordModal from './components/ChangePasswordModal';
 import { db } from './firebase';
 import {
@@ -17,16 +18,15 @@ import {
   orderBy,
   onSnapshot,
   addDoc,
-  serverTimestamp
+  serverTimestamp,
+  runTransaction
 } from 'firebase/firestore';
 
 export default function App() {
   const [user, setUser]       = useState(() => getSession());
   const [records, setRecords] = useState([]);
-  const [activeTab, setActiveTab] = useState(() => {
-    const s = getSession();
-    return s?.role === 'admin' ? 'records' : 'add';
-  });
+  const [products, setProducts] = useState([]);
+  const [activeTab, setActiveTab] = useState('products');
   const [pwdOpen, setPwdOpen] = useState(false);
 
   // Seed default users if they do not exist
@@ -73,9 +73,22 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Listen to products real-time
+  useEffect(() => {
+    const q = query(collection(db, 'products'), orderBy('name', 'asc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = [];
+      snapshot.forEach((doc) => {
+        list.push({ id: doc.id, ...doc.data() });
+      });
+      setProducts(list);
+    });
+    return () => unsubscribe();
+  }, []);
+
   function handleLogin(session) {
     setUser(session);
-    setActiveTab(session.role === 'admin' ? 'records' : 'add');
+    setActiveTab('products');
   }
 
   function handleLogout() {
@@ -83,6 +96,35 @@ export default function App() {
     setUser(null);
   }
 
+  // PRODUCT ACTIONS
+  async function handleAddProduct(data) {
+    try {
+      await addDoc(collection(db, 'products'), {
+        ...data,
+        createdAt: serverTimestamp()
+      });
+    } catch (err) {
+      console.error('Error adding product: ', err);
+    }
+  }
+
+  async function handleEditProduct(id, data) {
+    try {
+      await updateDoc(doc(db, 'products', id), data);
+    } catch (err) {
+      console.error('Error updating product: ', err);
+    }
+  }
+
+  async function handleDeleteProduct(id) {
+    try {
+      await deleteDoc(doc(db, 'products', id));
+    } catch (err) {
+      console.error('Error deleting product: ', err);
+    }
+  }
+
+  // ORDER ACTIONS
   async function handleAddRecord(data) {
     try {
       await addDoc(collection(db, 'orders'), {
@@ -94,11 +136,61 @@ export default function App() {
     }
   }
 
-  async function handleApprove(id) {
+  async function handleApprove(orderId) {
+    const order = records.find(r => r.id === orderId);
+    if (!order) return { success: false, message: 'Order not found.' };
+
+    const prod = products.find(p => p.name.toLowerCase() === order.productName.toLowerCase());
+    if (!prod) {
+      return { success: false, message: 'Product not found in inventory.' };
+    }
+
+    try {
+      const result = await runTransaction(db, async (transaction) => {
+        const prodRef = doc(db, 'products', prod.id);
+        const orderRef = doc(db, 'orders', orderId);
+
+        const prodSnap = await transaction.get(prodRef);
+        if (!prodSnap.exists()) {
+          throw new Error('Product not found in database.');
+        }
+
+        const currentQty = prodSnap.data().quantity;
+        if (currentQty < order.quantity) {
+          throw new Error('Insufficient stock');
+        }
+
+        // Deduct stock and round to avoid float inaccuracies
+        transaction.update(prodRef, {
+          quantity: Number((currentQty - order.quantity).toFixed(4))
+        });
+
+        // Delete approved order
+        transaction.delete(orderRef);
+
+        return { success: true };
+      });
+
+      return result;
+    } catch (err) {
+      console.error('Approval transaction failed: ', err);
+      return { success: false, message: err.message || 'Approval failed.' };
+    }
+  }
+
+  async function handleDeleteOrder(id) {
     try {
       await deleteDoc(doc(db, 'orders', id));
     } catch (err) {
-      console.error('Error approving record: ', err);
+      console.error('Error deleting order: ', err);
+    }
+  }
+
+  async function handleEditOrder(id, updatedData) {
+    try {
+      await updateDoc(doc(db, 'orders', id), updatedData);
+    } catch (err) {
+      console.error('Error updating order: ', err);
     }
   }
 
@@ -134,10 +226,40 @@ export default function App() {
         onLogout={handleLogout}
       />
 
-      {user.role === 'admin'
-        ? <AdminDashboard records={records} onApproveRecord={handleApprove} />
-        : <SalesDashboard records={records} onAddRecord={handleAddRecord} activeTab={activeTab} />
-      }
+      {user.role === 'admin' ? (
+        activeTab === 'products' ? (
+          <ProductsSection
+            user={user}
+            products={products}
+            onAddProduct={handleAddProduct}
+            onEditProduct={handleEditProduct}
+            onDeleteProduct={handleDeleteProduct}
+          />
+        ) : (
+          <AdminDashboard
+            records={records}
+            products={products}
+            onApproveRecord={handleApprove}
+            onDeleteRecord={handleDeleteOrder}
+            onEditRecord={handleEditOrder}
+          />
+        )
+      ) : activeTab === 'products' ? (
+        <ProductsSection
+          user={user}
+          products={products}
+          onAddProduct={handleAddProduct}
+          onEditProduct={handleEditProduct}
+          onDeleteProduct={handleDeleteProduct}
+        />
+      ) : (
+        <SalesDashboard
+          products={products}
+          records={records}
+          onAddRecord={handleAddRecord}
+          activeTab={activeTab}
+        />
+      )}
 
       <ChangePasswordModal
         isOpen={pwdOpen}
@@ -147,4 +269,3 @@ export default function App() {
     </>
   );
 }
-

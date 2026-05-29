@@ -12,18 +12,54 @@ function formatDateTime() {
   return `${dd}/${mm}/${yy} ${String(h).padStart(2,'0')}:${min} ${ampm}`;
 }
 
-export default function SalesDashboard({ records, onAddRecord, activeTab }) {
-  const [text, setText] = useState('');
+export default function SalesDashboard({ products, records, onAddRecord, activeTab }) {
+  const [productName, setProductName] = useState('');
+  const [quantity, setQuantity] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
   function handleAdd(e) {
     e.preventDefault();
-    setError(''); setSuccess('');
-    const trimmed = text.trim();
-    if (!trimmed) { setError('Order cannot be empty.'); return; }
-    onAddRecord({ datetime: formatDateTime(), order: trimmed, status: 'pending' });
-    setText('');
+    setError('');
+    setSuccess('');
+
+    const trimmedName = productName.trim();
+    const qtyVal = parseFloat(quantity);
+
+    if (!trimmedName || quantity === '') {
+      setError('Please fill in all fields.');
+      return;
+    }
+    if (isNaN(qtyVal) || qtyVal <= 0) {
+      setError('Quantity must be a positive number.');
+      return;
+    }
+
+    // 1. Check if product exists in Products collection
+    const matchedProduct = products.find(
+      p => p.name.toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (!matchedProduct) {
+      setError('Product not found');
+      return;
+    }
+
+    // 2. Check if inventory has sufficient stock
+    if (matchedProduct.quantity < qtyVal) {
+      setError('Insufficient stock');
+      return;
+    }
+
+    // Submit order
+    onAddRecord({
+      datetime: formatDateTime(),
+      productName: matchedProduct.name, // save name with correct case
+      quantity: qtyVal,
+      status: 'pending'
+    });
+
+    setProductName('');
+    setQuantity('');
     setSuccess('Order added successfully!');
     setTimeout(() => setSuccess(''), 2500);
   }
@@ -33,23 +69,37 @@ export default function SalesDashboard({ records, onAddRecord, activeTab }) {
       {activeTab === 'add' && (
         <div className="card">
           <div className="card-title">➕ Add New Order</div>
-          {error   && <div className="alert alert-danger">{error}</div>}
+          
+          {error && <div className="alert alert-danger">{error}</div>}
           {success && <div className="alert alert-success">{success}</div>}
+          
           <form onSubmit={handleAdd}>
             <div className="add-order-row">
-              <input
-                type="text"
-                className="form-control"
-                placeholder='e.g. 5kg Sugar  or  Rice 10kg'
-                value={text}
-                onChange={e => setText(e.target.value)}
-                autoFocus
-              />
+              <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Product Name (e.g. Sugar)"
+                  value={productName}
+                  onChange={e => setProductName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                <input
+                  type="number"
+                  step="any"
+                  className="form-control"
+                  placeholder="Quantity (e.g. 10.5)"
+                  value={quantity}
+                  onChange={e => setQuantity(e.target.value)}
+                />
+              </div>
               <button type="submit" className="btn btn-primary">Add Order</button>
             </div>
           </form>
           <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.6rem' }}>
-            ℹ️ Enter details like item name, quantities, or prices.
+            ℹ️ Product must already exist in inventory and have sufficient stock.
           </p>
         </div>
       )}
@@ -70,9 +120,10 @@ export default function SalesDashboard({ records, onAddRecord, activeTab }) {
               <table className="records-table">
                 <thead>
                   <tr>
-                    <th>#</th>
+                    <th>S/No</th>
                     <th>Date &amp; Time</th>
-                    <th>Order</th>
+                    <th>Product Name</th>
+                    <th>Product Quantity</th>
                     <th>Status</th>
                   </tr>
                 </thead>
@@ -81,7 +132,8 @@ export default function SalesDashboard({ records, onAddRecord, activeTab }) {
                     <tr key={r.id}>
                       <td style={{ fontWeight: 600 }}>{i + 1}</td>
                       <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{r.datetime}</td>
-                      <td style={{ fontWeight: 500 }}>{r.order}</td>
+                      <td style={{ fontWeight: 500 }}>{r.productName || r.order}</td>
+                      <td style={{ fontWeight: 600 }}>{r.quantity ?? '—'}</td>
                       <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
                     </tr>
                   ))}

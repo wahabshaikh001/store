@@ -8,14 +8,28 @@ export default function Navbar({ user, activeTab, setActiveTab, onChangePassword
 
         <div className="navbar-nav">
           {isAdmin ? (
-            <button
-              className={`nav-link ${activeTab === 'records' ? 'active' : ''}`}
-              onClick={() => setActiveTab('records')}
-            >
-              Records
-            </button>
+            <>
+              <button
+                className={`nav-link ${activeTab === 'products' ? 'active' : ''}`}
+                onClick={() => setActiveTab('products')}
+              >
+                Products
+              </button>
+              <button
+                className={`nav-link ${activeTab === 'records' ? 'active' : ''}`}
+                onClick={() => setActiveTab('records')}
+              >
+                Orders
+              </button>
+            </>
           ) : (
             <>
+              <button
+                className={`nav-link ${activeTab === 'products' ? 'active' : ''}`}
+                onClick={() => setActiveTab('products')}
+              >
+                Products
+              </button>
               <button
                 className={`nav-link ${activeTab === 'add' ? 'active' : ''}`}
                 onClick={() => setActiveTab('add')}
@@ -26,7 +40,7 @@ export default function Navbar({ user, activeTab, setActiveTab, onChangePassword
                 className={`nav-link ${activeTab === 'records' ? 'active' : ''}`}
                 onClick={() => setActiveTab('records')}
               >
-                Records
+                My Orders
               </button>
             </>
           )}
