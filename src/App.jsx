@@ -58,10 +58,47 @@ export default function App() {
 
   // Listen to pending orders real-time
   useEffect(() => {
-    const q = query(collection(db, 'orders'), orderBy('date', 'asc'));
+    const q = query(collection(db, 'orders'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list = [];
       snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      
+      // Sort client-side: oldest first, newest last
+      list.sort((a, b) => {
+        const getTime = (o) => {
+          if (!o) return 0;
+          if (o.createdAt) {
+            if (typeof o.createdAt === 'string') {
+              const parsed = Date.parse(o.createdAt);
+              if (!isNaN(parsed)) return parsed;
+            }
+            if (typeof o.createdAt.toMillis === 'function') {
+              return o.createdAt.toMillis();
+            }
+            if (o.createdAt.seconds) {
+              return o.createdAt.seconds * 1000;
+            }
+            if (typeof o.createdAt === 'number') {
+              return o.createdAt;
+            }
+          }
+          if (o.date && typeof o.date === 'string') {
+            const parsed = Date.parse(o.date);
+            if (!isNaN(parsed)) return parsed;
+          }
+          return 0;
+        };
+
+        const timeA = getTime(a);
+        const timeB = getTime(b);
+        if (timeA !== timeB) {
+          return timeA - timeB;
+        }
+        const idA = String(a.id || '');
+        const idB = String(b.id || '');
+        return idA.localeCompare(idB);
+      });
+      
       setRecords(list);
     });
     return () => unsubscribe();
@@ -232,7 +269,10 @@ export default function App() {
   // ── ORDER ACTIONS ─────────────────────────────────────────
   async function handleAddRecord(data) {
     try {
-      await addDoc(collection(db, 'orders'), data);
+      await addDoc(collection(db, 'orders'), {
+        ...data,
+        createdAt: new Date().toISOString()
+      });
     } catch (err) {
       console.error('Error adding record: ', err);
     }
