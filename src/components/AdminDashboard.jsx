@@ -4,6 +4,7 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
   const [editingOrderId, setEditingOrderId] = useState(null);
   const [editProductName, setEditProductName] = useState('');
   const [editQuantity, setEditQuantity] = useState('');
+  const [editDate, setEditDate] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -12,6 +13,7 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
     setEditingOrderId(order.id);
     setEditProductName(order.productName || order.order || '');
     setEditQuantity(String(order.quantity ?? ''));
+    setEditDate(order.date || '');
     setError('');
     setSuccess('');
   }
@@ -21,6 +23,7 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
     setEditingOrderId(null);
     setEditProductName('');
     setEditQuantity('');
+    setEditDate('');
     setError('');
   }
 
@@ -29,9 +32,10 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
     setError('');
     const trimmedName = editProductName.trim();
     const qtyVal = parseFloat(editQuantity);
+    const selectedDate = editDate;
 
-    if (!trimmedName || editQuantity === '') {
-      setError('Please fill in both fields.');
+    if (!trimmedName || editQuantity === '' || !selectedDate) {
+      setError('Please fill in all fields.');
       return;
     }
     if (isNaN(qtyVal) || qtyVal <= 0) {
@@ -46,15 +50,12 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
       return;
     }
 
-    // Verify stock locally
-    if (prod.quantity < qtyVal) {
-      setError('Insufficient stock for this edit.');
-      return;
-    }
+    // Stock check bypassed to allow negative inventory
 
     onEditRecord(orderId, {
       productName: prod.name,
-      quantity: qtyVal
+      quantity: qtyVal,
+      date: selectedDate
     });
     setEditingOrderId(null);
     setSuccess('Order updated successfully.');
@@ -77,10 +78,7 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
       setError('Product not found in inventory.');
       return;
     }
-    if (prod.quantity < order.quantity) {
-      setError('Insufficient stock');
-      return;
-    }
+    // Stock check bypassed to allow negative inventory
 
     // Execute backend transaction
     const res = await onApproveRecord(orderId);
@@ -114,7 +112,7 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
               <thead>
                 <tr>
                   <th style={{ width: '60px' }}>S/No</th>
-                  <th>Date &amp; Time</th>
+                  <th>Date</th>
                   <th>Product Name</th>
                   <th>Product Quantity</th>
                   <th style={{ width: '110px' }}>Approve</th>
@@ -129,7 +127,20 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
                   return (
                     <tr key={r.id}>
                       <td style={{ fontWeight: 600 }}>{i + 1}</td>
-                      <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{r.datetime}</td>
+                      
+                      {isEditing ? (
+                        <td>
+                          <input
+                            type="date"
+                            className="form-control form-control-sm"
+                            value={editDate}
+                            onChange={e => setEditDate(e.target.value)}
+                            style={{ padding: '0.35rem 0.6rem' }}
+                          />
+                        </td>
+                      ) : (
+                        <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{r.date || r.datetime}</td>
+                      )}
                       
                       {isEditing ? (
                         <td>

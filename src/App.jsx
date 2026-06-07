@@ -5,6 +5,8 @@ import Navbar from './components/Navbar';
 import SalesDashboard from './components/SalesDashboard';
 import AdminDashboard from './components/AdminDashboard';
 import ProductsSection from './components/ProductsSection';
+import ApprovedOrders from './components/ApprovedOrders';
+import ProductHistory from './components/ProductHistory';
 import ChangePasswordModal from './components/ChangePasswordModal';
 import { db } from './firebase';
 import {
@@ -18,16 +20,20 @@ import {
   orderBy,
   onSnapshot,
   addDoc,
+  getDocs,
   serverTimestamp,
-  runTransaction
+  runTransaction,
+  writeBatch
 } from 'firebase/firestore';
 
 export default function App() {
-  const [user, setUser]       = useState(() => getSession());
-  const [records, setRecords] = useState([]);
-  const [products, setProducts] = useState([]);
-  const [activeTab, setActiveTab] = useState('products');
-  const [pwdOpen, setPwdOpen] = useState(false);
+  const [user, setUser]               = useState(() => getSession());
+  const [records, setRecords]         = useState([]);
+  const [products, setProducts]       = useState([]);
+  const [approvedOrders, setApprovedOrders] = useState([]);
+  const [historyRecords, setHistoryRecords] = useState([]);
+  const [activeTab, setActiveTab]     = useState('products');
+  const [pwdOpen, setPwdOpen]         = useState(false);
 
   // Seed default users if they do not exist
   useEffect(() => {
@@ -35,23 +41,13 @@ export default function App() {
       try {
         const adminRef = doc(db, 'users', 'admin');
         const salesRef = doc(db, 'users', 'sales');
-
         const adminSnap = await getDoc(adminRef);
         if (!adminSnap.exists()) {
-          await setDoc(adminRef, {
-            username: 'admin',
-            password: '1234',
-            role: 'admin'
-          });
+          await setDoc(adminRef, { username: 'admin', password: '1234', role: 'admin' });
         }
-
         const salesSnap = await getDoc(salesRef);
         if (!salesSnap.exists()) {
-          await setDoc(salesRef, {
-            username: 'sales',
-            password: '1234',
-            role: 'sales'
-          });
+          await setDoc(salesRef, { username: 'sales', password: '1234', role: 'sales' });
         }
       } catch (error) {
         console.error('Error seeding users: ', error);
@@ -60,15 +56,24 @@ export default function App() {
     seedDefaultUsers();
   }, []);
 
-  // Listen to active orders real-time
+  // Listen to pending orders real-time
   useEffect(() => {
-    const q = query(collection(db, 'orders'), orderBy('createdAt', 'asc'));
+    const q = query(collection(db, 'orders'), orderBy('date', 'asc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() });
-      });
+      snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
       setRecords(list);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Listen to approved orders real-time
+  useEffect(() => {
+    const q = query(collection(db, 'approvedOrders'), orderBy('date', 'asc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = [];
+      snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setApprovedOrders(list);
     });
     return () => unsubscribe();
   }, []);
@@ -78,10 +83,19 @@ export default function App() {
     const q = query(collection(db, 'products'), orderBy('name', 'asc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() });
-      });
+      snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
       setProducts(list);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Listen to product history real-time
+  useEffect(() => {
+    const q = query(collection(db, 'productHistory'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = [];
+      snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setHistoryRecords(list);
     });
     return () => unsubscribe();
   }, []);
@@ -96,12 +110,56 @@ export default function App() {
     setUser(null);
   }
 
-  // PRODUCT ACTIONS
+  // ── PRODUCT ACTIONS ──────────────────────────────────────
   async function handleAddProduct(data) {
     try {
-      await addDoc(collection(db, 'products'), {
-        ...data,
-        createdAt: serverTimestamp()
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      const dateStr = `${yyyy}-${mm}-${dd}`;
+
+      await runTransaction(db, async (transaction) => {
+        const existingLocal = products.find(
+          (p) => p.name.toLowerCase() === data.name.trim().toLowerCase()
+        );
+
+        let targetProductRef;
+        let isNew = true;
+        let newQty = data.quantity;
+        let finalProductName = data.name.trim();
+
+        if (existingLocal) {
+          targetProductRef = doc(db, 'products', existingLocal.id);
+          const docSnap = await transaction.get(targetProductRef);
+          if (docSnap.exists()) {
+            isNew = false;
+            const currentQty = docSnap.data().quantity || 0;
+            newQty = Number((currentQty + data.quantity).toFixed(4));
+            finalProductName = docSnap.data().name || finalProductName;
+          }
+        }
+
+        if (isNew) {
+          const newProdRef = doc(collection(db, 'products'));
+          transaction.set(newProdRef, {
+            name: finalProductName,
+            quantity: data.quantity,
+            createdAt: serverTimestamp()
+          });
+        } else {
+          transaction.update(targetProductRef, {
+            quantity: newQty
+          });
+        }
+
+        const historyRef = doc(collection(db, 'productHistory'));
+        transaction.set(historyRef, {
+          productName: finalProductName,
+          quantityAdded: data.quantity,
+          date: dateStr,
+          createdAt: new Date().toISOString()
+        });
       });
     } catch (err) {
       console.error('Error adding product: ', err);
@@ -110,7 +168,34 @@ export default function App() {
 
   async function handleEditProduct(id, data) {
     try {
-      await updateDoc(doc(db, 'products', id), data);
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      const dateStr = `${yyyy}-${mm}-${dd}`;
+
+      await runTransaction(db, async (transaction) => {
+        const prodRef = doc(db, 'products', id);
+        const prodSnap = await transaction.get(prodRef);
+        if (!prodSnap.exists()) throw new Error('Product not found.');
+
+        const prevData = prodSnap.data();
+        const prevQty = prevData.quantity || 0;
+        const newQty = data.quantity || 0;
+
+        transaction.update(prodRef, data);
+
+        if (newQty > prevQty) {
+          const qtyAdded = Number((newQty - prevQty).toFixed(4));
+          const historyRef = doc(collection(db, 'productHistory'));
+          transaction.set(historyRef, {
+            productName: data.name || prevData.name,
+            quantityAdded: qtyAdded,
+            date: dateStr,
+            createdAt: new Date().toISOString()
+          });
+        }
+      });
     } catch (err) {
       console.error('Error updating product: ', err);
     }
@@ -124,13 +209,30 @@ export default function App() {
     }
   }
 
-  // ORDER ACTIONS
+  // ── PRODUCT HISTORY ACTIONS ───────────────────────────────
+  async function handleDeleteHistory(id) {
+    try {
+      await deleteDoc(doc(db, 'productHistory', id));
+    } catch (err) {
+      console.error('Error deleting history record: ', err);
+    }
+  }
+
+  async function handleDeleteAllHistory() {
+    try {
+      const snapshot = await getDocs(collection(db, 'productHistory'));
+      const batch = writeBatch(db);
+      snapshot.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    } catch (err) {
+      console.error('Error deleting all history: ', err);
+    }
+  }
+
+  // ── ORDER ACTIONS ─────────────────────────────────────────
   async function handleAddRecord(data) {
     try {
-      await addDoc(collection(db, 'orders'), {
-        ...data,
-        createdAt: serverTimestamp()
-      });
+      await addDoc(collection(db, 'orders'), data);
     } catch (err) {
       console.error('Error adding record: ', err);
     }
@@ -141,31 +243,34 @@ export default function App() {
     if (!order) return { success: false, message: 'Order not found.' };
 
     const prod = products.find(p => p.name.toLowerCase() === order.productName.toLowerCase());
-    if (!prod) {
-      return { success: false, message: 'Product not found in inventory.' };
-    }
+    if (!prod) return { success: false, message: 'Product not found in inventory.' };
 
     try {
       const result = await runTransaction(db, async (transaction) => {
-        const prodRef = doc(db, 'products', prod.id);
+        const prodRef  = doc(db, 'products', prod.id);
         const orderRef = doc(db, 'orders', orderId);
+        const approvedRef = doc(collection(db, 'approvedOrders'));
 
         const prodSnap = await transaction.get(prodRef);
-        if (!prodSnap.exists()) {
-          throw new Error('Product not found in database.');
-        }
+        if (!prodSnap.exists()) throw new Error('Product not found in database.');
 
         const currentQty = prodSnap.data().quantity;
-        if (currentQty < order.quantity) {
-          throw new Error('Insufficient stock');
-        }
 
-        // Deduct stock and round to avoid float inaccuracies
+        // Deduct stock (negative values allowed)
         transaction.update(prodRef, {
           quantity: Number((currentQty - order.quantity).toFixed(4))
         });
 
-        // Delete approved order
+        // Write the order to approvedOrders collection
+        transaction.set(approvedRef, {
+          date:        order.date        || '',
+          productName: order.productName || '',
+          quantity:    order.quantity    || 0,
+          status:      'approved',
+          approvedAt:  new Date().toISOString()
+        });
+
+        // Remove from pending orders
         transaction.delete(orderRef);
 
         return { success: true };
@@ -194,18 +299,35 @@ export default function App() {
     }
   }
 
+  // ── APPROVED ORDER ACTIONS ────────────────────────────────
+  async function handleDeleteApproved(id) {
+    try {
+      await deleteDoc(doc(db, 'approvedOrders', id));
+    } catch (err) {
+      console.error('Error deleting approved order: ', err);
+    }
+  }
+
+  async function handleDeleteAllApproved() {
+    try {
+      const snapshot = await getDocs(collection(db, 'approvedOrders'));
+      const batch = writeBatch(db);
+      snapshot.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    } catch (err) {
+      console.error('Error deleting all approved orders: ', err);
+    }
+  }
+
+  // ── PASSWORD ──────────────────────────────────────────────
   async function handleChangePassword(oldPwd, newPwd) {
     if (!user) return { success: false, message: 'No session.' };
     try {
-      const userRef = doc(db, 'users', user.role);
+      const userRef  = doc(db, 'users', user.role);
       const userSnap = await getDoc(userRef);
-      if (!userSnap.exists()) {
-        return { success: false, message: 'User profile not found in database.' };
-      }
+      if (!userSnap.exists()) return { success: false, message: 'User profile not found in database.' };
       const data = userSnap.data();
-      if (data.password !== oldPwd) {
-        return { success: false, message: 'Current password is incorrect.' };
-      }
+      if (data.password !== oldPwd) return { success: false, message: 'Current password is incorrect.' };
       await updateDoc(userRef, { password: newPwd });
       return { success: true, message: 'Password updated successfully!' };
     } catch (err) {
@@ -226,31 +348,42 @@ export default function App() {
         onLogout={handleLogout}
       />
 
-      {user.role === 'admin' ? (
-        activeTab === 'products' ? (
-          <ProductsSection
-            user={user}
-            products={products}
-            onAddProduct={handleAddProduct}
-            onEditProduct={handleEditProduct}
-            onDeleteProduct={handleDeleteProduct}
-          />
-        ) : (
-          <AdminDashboard
-            records={records}
-            products={products}
-            onApproveRecord={handleApprove}
-            onDeleteRecord={handleDeleteOrder}
-            onEditRecord={handleEditOrder}
-          />
-        )
-      ) : activeTab === 'products' ? (
+      {activeTab === 'products' ? (
         <ProductsSection
           user={user}
           products={products}
           onAddProduct={handleAddProduct}
           onEditProduct={handleEditProduct}
           onDeleteProduct={handleDeleteProduct}
+        />
+      ) : activeTab === 'add' ? (
+        <SalesDashboard
+          products={products}
+          records={records}
+          onAddRecord={handleAddRecord}
+          activeTab={activeTab}
+        />
+      ) : activeTab === 'approved' ? (
+        <ApprovedOrders
+          user={user}
+          approvedOrders={approvedOrders}
+          onDeleteApproved={handleDeleteApproved}
+          onDeleteAllApproved={handleDeleteAllApproved}
+        />
+      ) : activeTab === 'history' ? (
+        <ProductHistory
+          user={user}
+          historyRecords={historyRecords}
+          onDeleteHistory={handleDeleteHistory}
+          onDeleteAllHistory={handleDeleteAllHistory}
+        />
+      ) : user.role === 'admin' ? (
+        <AdminDashboard
+          records={records}
+          products={products}
+          onApproveRecord={handleApprove}
+          onDeleteRecord={handleDeleteOrder}
+          onEditRecord={handleEditOrder}
         />
       ) : (
         <SalesDashboard

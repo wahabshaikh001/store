@@ -1,32 +1,43 @@
 import { useState } from 'react';
 
-function formatDateTime() {
-  const now = new Date();
-  const dd = String(now.getDate()).padStart(2, '0');
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const yy = String(now.getFullYear()).slice(-2);
-  let h = now.getHours();
-  const min = String(now.getMinutes()).padStart(2, '0');
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  h = h % 12 || 12;
-  return `${dd}/${mm}/${yy} ${String(h).padStart(2,'0')}:${min} ${ampm}`;
-}
-
 export default function SalesDashboard({ products, records, onAddRecord, activeTab }) {
   const [productName, setProductName] = useState('');
   const [quantity, setQuantity] = useState('');
+  
+  // Date picker state pre-filled with local today's date (YYYY-MM-DD format)
+  const [date, setDate] = useState(() => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  });
+
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  // Auto-suggestions logic (case-insensitive filter)
+  const filteredSuggestions = productName.trim()
+    ? products.filter(p => p.name.toLowerCase().includes(productName.toLowerCase()))
+    : [];
+
+  // Active product check
+  const trimmedName = productName.trim();
+  const matchedProduct = trimmedName 
+    ? products.find(p => p.name.toLowerCase() === trimmedName.toLowerCase()) 
+    : null;
 
   function handleAdd(e) {
     e.preventDefault();
     setError('');
     setSuccess('');
 
-    const trimmedName = productName.trim();
+    const trimmed = productName.trim();
     const qtyVal = parseFloat(quantity);
+    const selectedDate = date;
 
-    if (!trimmedName || quantity === '') {
+    if (!trimmed || quantity === '') {
       setError('Please fill in all fields.');
       return;
     }
@@ -34,34 +45,43 @@ export default function SalesDashboard({ products, records, onAddRecord, activeT
       setError('Quantity must be a positive number.');
       return;
     }
+    if (!selectedDate) {
+      setError('Every order must have a valid date.');
+      return;
+    }
 
-    // 1. Check if product exists in Products collection
-    const matchedProduct = products.find(
-      p => p.name.toLowerCase() === trimmedName.toLowerCase()
-    );
+    // 1. Verify product availability
     if (!matchedProduct) {
-      setError('Product not found');
+      setError('Product not available');
       return;
     }
 
-    // 2. Check if inventory has sufficient stock
-    if (matchedProduct.quantity < qtyVal) {
-      setError('Insufficient stock');
-      return;
-    }
-
-    // Submit order
+    // Create order with manual date and no auto-timestamps
     onAddRecord({
-      datetime: formatDateTime(),
-      productName: matchedProduct.name, // save name with correct case
+      date: selectedDate,
+      productName: matchedProduct.name, // standard casing
       quantity: qtyVal,
       status: 'pending'
     });
 
     setProductName('');
     setQuantity('');
+    setShowSuggestions(false);
+    
+    // Reset date picker to today's local date
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    setDate(`${yyyy}-${mm}-${dd}`);
+
     setSuccess('Order added successfully!');
     setTimeout(() => setSuccess(''), 2500);
+  }
+
+  function handleSelectSuggestion(name) {
+    setProductName(name);
+    setShowSuggestions(false);
   }
 
   return (
@@ -74,33 +94,105 @@ export default function SalesDashboard({ products, records, onAddRecord, activeT
           {success && <div className="alert alert-success">{success}</div>}
           
           <form onSubmit={handleAdd}>
-            <div className="add-order-row">
-              <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+            <div className="add-order-grid">
+              {/* Product Name with realtime Autocomplete Dropdown */}
+              <div className="form-group" style={{ position: 'relative', marginBottom: 0 }}>
+                <label htmlFor="productSearch">Product Name</label>
                 <input
+                  id="productSearch"
                   type="text"
                   className="form-control"
-                  placeholder="Product Name (e.g. Sugar)"
+                  placeholder="Type to search (e.g. Sugar)"
                   value={productName}
-                  onChange={e => setProductName(e.target.value)}
+                  onChange={e => {
+                    setProductName(e.target.value);
+                    setShowSuggestions(true);
+                  }}
+                  onFocus={() => setShowSuggestions(true)}
+                  onBlur={() => {
+                    // Slight delay to allow suggestion onMouseDown click to register first
+                    setTimeout(() => setShowSuggestions(false), 200);
+                  }}
                   autoFocus
+                  autoComplete="off"
                 />
+
+                {/* Real-time indicator text */}
+                {trimmedName && (
+                  <div style={{
+                    fontSize: '0.78rem',
+                    marginTop: '0.25rem',
+                    fontWeight: 600,
+                    color: matchedProduct ? 'var(--success-text)' : 'var(--danger)'
+                  }}>
+                    {matchedProduct 
+                      ? `✓ Product available (Current Stock: ${matchedProduct.quantity})` 
+                      : `✗ Product not available`
+                    }
+                  </div>
+                )}
+
+                {/* Dropdown container */}
+                {showSuggestions && productName.trim().length > 0 && (
+                  <div className="suggestions-dropdown">
+                    {filteredSuggestions.length > 0 ? (
+                      filteredSuggestions.map(p => (
+                        <div
+                          key={p.id}
+                          className="suggestion-item"
+                          onMouseDown={(e) => {
+                            e.preventDefault(); // prevents blur event
+                            handleSelectSuggestion(p.name);
+                          }}
+                        >
+                          <span style={{ fontWeight: 600 }}>{p.name}</span>
+                          <span style={{ 
+                            fontSize: '0.75rem', 
+                            color: p.quantity <= 10 ? 'var(--danger)' : 'var(--text-muted)',
+                            fontWeight: p.quantity <= 10 ? 600 : 500
+                          }}>
+                            Qty: {p.quantity}
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="suggestion-no-match">No product found</div>
+                    )}
+                  </div>
+                )}
               </div>
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+
+              {/* Product Quantity */}
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label htmlFor="orderQuantity">Quantity</label>
                 <input
+                  id="orderQuantity"
                   type="number"
                   step="any"
                   className="form-control"
-                  placeholder="Quantity (e.g. 10.5)"
+                  placeholder="e.g. 10.5"
                   value={quantity}
                   onChange={e => setQuantity(e.target.value)}
                 />
               </div>
-              <button type="submit" className="btn btn-primary">Add Order</button>
+
+              {/* Order Date Picker */}
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label htmlFor="orderDatePicker">Order Date</label>
+                <input
+                  id="orderDatePicker"
+                  type="date"
+                  className="form-control"
+                  value={date}
+                  onChange={e => setDate(e.target.value)}
+                />
+              </div>
             </div>
+
+            <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>
+              Add Order
+            </button>
           </form>
-          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.6rem' }}>
-            ℹ️ Product must already exist in inventory and have sufficient stock.
-          </p>
         </div>
       )}
 
@@ -121,7 +213,7 @@ export default function SalesDashboard({ products, records, onAddRecord, activeT
                 <thead>
                   <tr>
                     <th>S/No</th>
-                    <th>Date &amp; Time</th>
+                    <th>Date</th>
                     <th>Product Name</th>
                     <th>Product Quantity</th>
                     <th>Status</th>
@@ -131,9 +223,9 @@ export default function SalesDashboard({ products, records, onAddRecord, activeT
                   {records.map((r, i) => (
                     <tr key={r.id}>
                       <td style={{ fontWeight: 600 }}>{i + 1}</td>
-                      <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{r.datetime}</td>
-                      <td style={{ fontWeight: 500 }}>{r.productName || r.order}</td>
-                      <td style={{ fontWeight: 600 }}>{r.quantity ?? '—'}</td>
+                      <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{r.date || r.datetime}</td>
+                      <td style={{ fontWeight: 500 }}>{r.productName}</td>
+                      <td style={{ fontWeight: 600 }}>{r.quantity}</td>
                       <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
                     </tr>
                   ))}

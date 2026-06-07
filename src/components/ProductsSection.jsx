@@ -8,6 +8,12 @@ export default function ProductsSection({ user, products, onAddProduct, onEditPr
   const [quantity, setQuantity] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Auto-suggestions logic
+  const filteredSuggestions = name.trim()
+    ? products.filter(p => p.name.toLowerCase().includes(name.toLowerCase()))
+    : [];
 
   // Table filter states
   const [search, setSearch] = useState('');
@@ -39,15 +45,11 @@ export default function ProductsSection({ user, products, onAddProduct, onEditPr
 
     // Check duplicate name case-insensitively
     const duplicate = products.find(p => p.name.toLowerCase() === trimmedName.toLowerCase());
-    if (duplicate) {
-      setError('A product with this name already exists.');
-      return;
-    }
 
     onAddProduct({ name: trimmedName, quantity: qtyVal });
     setName('');
     setQuantity('');
-    setSuccess('Product added successfully!');
+    setSuccess(duplicate ? 'Product stock updated successfully!' : 'Product added successfully!');
     setTimeout(() => setSuccess(''), 2500);
   }
 
@@ -167,14 +169,51 @@ export default function ProductsSection({ user, products, onAddProduct, onEditPr
 
         <form onSubmit={handleAddSubmit}>
           <div className="add-order-row">
-            <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+            <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: '0.4rem', position: 'relative' }}>
               <input
                 type="text"
                 className="form-control"
                 placeholder="Product Name (e.g. Sugar)"
                 value={name}
-                onChange={e => setName(e.target.value)}
+                onChange={e => {
+                  setName(e.target.value);
+                  setShowSuggestions(true);
+                }}
+                onFocus={() => setShowSuggestions(true)}
+                onBlur={() => {
+                  setTimeout(() => setShowSuggestions(false), 200);
+                }}
+                autoComplete="off"
               />
+
+              {showSuggestions && name.trim().length > 0 && (
+                <div className="suggestions-dropdown" style={{ top: '100%', left: 0, right: 0 }}>
+                  {filteredSuggestions.length > 0 ? (
+                    filteredSuggestions.map(p => (
+                      <div
+                        key={p.id}
+                        className="suggestion-item"
+                        onMouseDown={(e) => {
+                          e.preventDefault(); // prevents input blur
+                          setName(p.name);
+                          setShowSuggestions(false);
+                        }}
+                      >
+                        <span style={{ fontWeight: 600 }}>{p.name}</span>
+                        <span style={{ 
+                          fontSize: '0.75rem', 
+                          color: p.quantity <= 10 ? 'var(--danger)' : 'var(--text-muted)',
+                          fontWeight: p.quantity <= 10 ? 600 : 500
+                        }}>
+                          (Current Qty: {p.quantity})
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="suggestion-no-match">No product found</div>
+                  )}
+                </div>
+              )}
             </div>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
               <input
