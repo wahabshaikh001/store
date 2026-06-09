@@ -1,8 +1,16 @@
 import { useState } from 'react';
+import Pagination from './Pagination';
 
 export default function SalesDashboard({ products, records, onAddRecord, activeTab }) {
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const totalPages = Math.max(1, Math.ceil(records.length / 10));
+  const activePage = Math.min(currentPage, totalPages);
+  const paginatedRecords = records.slice((activePage - 1) * 10, activePage * 10);
+
   const [productName, setProductName] = useState('');
   const [quantity, setQuantity] = useState('');
+  const [bookType, setBookType] = useState('Large Book');
   
   // Date picker state pre-filled with local today's date (YYYY-MM-DD format)
   const [date, setDate] = useState(() => {
@@ -56,16 +64,18 @@ export default function SalesDashboard({ products, records, onAddRecord, activeT
       return;
     }
 
-    // Create order with manual date and no auto-timestamps
+    // Create order with manual date and book type
     onAddRecord({
       date: selectedDate,
       productName: matchedProduct.name, // standard casing
       quantity: qtyVal,
+      bookType: bookType,
       status: 'pending'
     });
 
     setProductName('');
     setQuantity('');
+    setBookType('Large Book');
     setShowSuggestions(false);
     
     // Reset date picker to today's local date
@@ -94,7 +104,7 @@ export default function SalesDashboard({ products, records, onAddRecord, activeT
           {success && <div className="alert alert-success">{success}</div>}
           
           <form onSubmit={handleAdd}>
-            <div className="add-order-grid">
+            <div className="add-order-grid" style={{ gridTemplateColumns: '2fr 1fr 1fr 1.2fr' }}>
               {/* Product Name with realtime Autocomplete Dropdown */}
               <div className="form-group" style={{ position: 'relative', marginBottom: 0 }}>
                 <label htmlFor="productSearch">Product Name</label>
@@ -176,6 +186,20 @@ export default function SalesDashboard({ products, records, onAddRecord, activeT
                 />
               </div>
 
+              {/* Book Type Dropdown */}
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label htmlFor="bookTypeSelect">Book Type</label>
+                <select
+                  id="bookTypeSelect"
+                  className="form-control"
+                  value={bookType}
+                  onChange={e => setBookType(e.target.value)}
+                >
+                  <option value="Large Book">📘 Large Book</option>
+                  <option value="Small Book">📗 Small Book</option>
+                </select>
+              </div>
+
               {/* Order Date Picker */}
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label htmlFor="orderDatePicker">Order Date</label>
@@ -208,7 +232,8 @@ export default function SalesDashboard({ products, records, onAddRecord, activeT
               <p>No orders yet. Go to <strong>Add Order</strong> to create one.</p>
             </div>
           ) : (
-            <div className="table-wrap">
+            <>
+              <div className="table-wrap">
               <table className="records-table">
                 <thead>
                   <tr>
@@ -216,23 +241,36 @@ export default function SalesDashboard({ products, records, onAddRecord, activeT
                     <th>Date</th>
                     <th>Product Name</th>
                     <th>Product Quantity</th>
+                    <th>Book Type</th>
                     <th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {records.map((r, i) => (
+                  {paginatedRecords.map((r, i) => (
                     <tr key={r.id}>
-                      <td style={{ fontWeight: 600 }}>{i + 1}</td>
+                      <td style={{ fontWeight: 600 }}>{(activePage - 1) * 10 + i + 1}</td>
                       <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{r.date || r.datetime}</td>
                       <td style={{ fontWeight: 500 }}>{r.productName}</td>
                       <td style={{ fontWeight: 600 }}>{r.quantity}</td>
+                      <td>
+                        <span className={`badge badge-book ${r.bookType === 'Small Book' ? 'badge-book-small' : 'badge-book-large'}`}>
+                          {r.bookType === 'Small Book' ? '📗' : '📘'} {r.bookType || 'Large Book'}
+                        </span>
+                      </td>
                       <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          )}
+            <Pagination
+              currentPage={activePage}
+              totalEntries={records.length}
+              pageSize={10}
+              onPageChange={setCurrentPage}
+            />
+          </>
+        )}
         </div>
       )}
     </div>

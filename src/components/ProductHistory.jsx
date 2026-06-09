@@ -1,7 +1,14 @@
 import { useState } from 'react';
+import Pagination from './Pagination';
 
 export default function ProductHistory({ user, historyRecords, onDeleteHistory, onDeleteAllHistory }) {
   const isAdmin = user?.role === 'admin';
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const totalPages = Math.max(1, Math.ceil(historyRecords.length / 10));
+  const activePage = Math.min(currentPage, totalPages);
+  const paginatedHistory = historyRecords.slice((activePage - 1) * 10, activePage * 10);
+
   const [confirmAll, setConfirmAll] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -61,7 +68,8 @@ export default function ProductHistory({ user, historyRecords, onDeleteHistory, 
             <p>No product history records found.</p>
           </div>
         ) : (
-          <div className="table-wrap">
+          <>
+            <div className="table-wrap">
             <table className="records-table">
               <thead>
                 <tr>
@@ -73,9 +81,9 @@ export default function ProductHistory({ user, historyRecords, onDeleteHistory, 
                 </tr>
               </thead>
               <tbody>
-                {historyRecords.map((r, i) => (
+                {paginatedHistory.map((r, i) => (
                   <tr key={r.id}>
-                    <td style={{ fontWeight: 600 }}>{i + 1}</td>
+                    <td style={{ fontWeight: 600 }}>{(activePage - 1) * 10 + i + 1}</td>
                     <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{r.date || '—'}</td>
                     <td style={{ fontWeight: 500 }}>{r.productName}</td>
                     <td style={{ fontWeight: 600, color: 'var(--primary)' }}>+{r.quantityAdded}</td>
@@ -98,7 +106,14 @@ export default function ProductHistory({ user, historyRecords, onDeleteHistory, 
               </tbody>
             </table>
           </div>
-        )}
+          <Pagination
+            currentPage={activePage}
+            totalEntries={historyRecords.length}
+            pageSize={10}
+            onPageChange={setCurrentPage}
+          />
+        </>
+      )}
       </div>
     </div>
   );

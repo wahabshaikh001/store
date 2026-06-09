@@ -1,12 +1,31 @@
 import { useState } from 'react';
+import Pagination from './Pagination';
 
 export default function AdminDashboard({ records, products, onApproveRecord, onDeleteRecord, onEditRecord }) {
+  const [bookTab, setBookTab] = useState('Large Book');
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Filter records by book type
+  const filteredByBook = records.filter(r => (r.bookType || 'Large Book') === bookTab);
+  
+  const totalPages = Math.max(1, Math.ceil(filteredByBook.length / 10));
+  const activePage = Math.min(currentPage, totalPages);
+  const paginatedRecords = filteredByBook.slice((activePage - 1) * 10, activePage * 10);
+
   const [editingOrderId, setEditingOrderId] = useState(null);
   const [editProductName, setEditProductName] = useState('');
   const [editQuantity, setEditQuantity] = useState('');
   const [editDate, setEditDate] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  function handleBookTabChange(tab) {
+    setBookTab(tab);
+    setCurrentPage(1);
+    setEditingOrderId(null);
+    setError('');
+    setSuccess('');
+  }
 
   // Start editing order
   function startEdit(order) {
@@ -95,19 +114,38 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
       <div className="card">
         <div className="card-title">🛡️ Pending Orders — Admin Approval</div>
 
+        {/* Book Type Sub-Tabs */}
+        <div className="book-tabs">
+          <button
+            className={`book-tab ${bookTab === 'Large Book' ? 'active' : ''}`}
+            onClick={() => handleBookTabChange('Large Book')}
+          >
+            📘 Large Book
+            <span className="book-tab-count">{records.filter(r => (r.bookType || 'Large Book') === 'Large Book').length}</span>
+          </button>
+          <button
+            className={`book-tab ${bookTab === 'Small Book' ? 'active' : ''}`}
+            onClick={() => handleBookTabChange('Small Book')}
+          >
+            📗 Small Book
+            <span className="book-tab-count">{records.filter(r => r.bookType === 'Small Book').length}</span>
+          </button>
+        </div>
+
         {error && <div className="alert alert-danger">{error}</div>}
         {success && <div className="alert alert-success">{success}</div>}
 
-        {records.length === 0 ? (
+        {filteredByBook.length === 0 ? (
           <div className="no-records">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <p>All orders approved! Nothing pending.</p>
+            <p>No {bookTab} orders pending. All clear!</p>
           </div>
         ) : (
-          <div className="table-wrap">
+          <>
+            <div className="table-wrap">
             <table className="records-table">
               <thead>
                 <tr>
@@ -115,18 +153,19 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
                   <th>Date</th>
                   <th>Product Name</th>
                   <th>Product Quantity</th>
+                  <th>Book Type</th>
                   <th style={{ width: '110px' }}>Approve</th>
                   <th style={{ width: '110px' }}>Edit</th>
                   <th style={{ width: '110px' }}>Delete</th>
                 </tr>
               </thead>
               <tbody>
-                {records.map((r, i) => {
+                {paginatedRecords.map((r, i) => {
                   const isEditing = r.id === editingOrderId;
                   
                   return (
                     <tr key={r.id}>
-                      <td style={{ fontWeight: 600 }}>{i + 1}</td>
+                      <td style={{ fontWeight: 600 }}>{(activePage - 1) * 10 + i + 1}</td>
                       
                       {isEditing ? (
                         <td>
@@ -170,6 +209,12 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
                       ) : (
                         <td style={{ fontWeight: 600 }}>{r.quantity ?? '—'}</td>
                       )}
+
+                      <td>
+                        <span className={`badge badge-book ${r.bookType === 'Small Book' ? 'badge-book-small' : 'badge-book-large'}`}>
+                          {r.bookType === 'Small Book' ? '📗' : '📘'} {r.bookType || 'Large Book'}
+                        </span>
+                      </td>
 
                       <td>
                         <button
@@ -224,7 +269,14 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
               </tbody>
             </table>
           </div>
-        )}
+          <Pagination
+            currentPage={activePage}
+            totalEntries={filteredByBook.length}
+            pageSize={10}
+            onPageChange={setCurrentPage}
+          />
+        </>
+      )}
       </div>
     </div>
   );

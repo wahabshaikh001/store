@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Pagination from './Pagination';
 
 export default function ProductsSection({ user, products, onAddProduct, onEditProduct, onDeleteProduct }) {
   const isAdmin = user?.role === 'admin';
@@ -18,6 +19,10 @@ export default function ProductsSection({ user, products, onAddProduct, onEditPr
   // Table filter states
   const [search, setSearch] = useState('');
   const [filterLowStock, setFilterLowStock] = useState(false);
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+
 
   // Inline edit states
   const [editingId, setEditingId] = useState(null);
@@ -101,6 +106,10 @@ export default function ProductsSection({ user, products, onAddProduct, onEditPr
     const matchesLowStock = filterLowStock ? p.quantity <= 10 : true;
     return matchesSearch && matchesLowStock;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / 10));
+  const activePage = Math.min(currentPage, totalPages);
+  const paginatedProducts = filteredProducts.slice((activePage - 1) * 10, activePage * 10);
 
   // Export to Excel / CSV
   function handleExportExcel() {
@@ -251,12 +260,12 @@ export default function ProductsSection({ user, products, onAddProduct, onEditPr
             style={{ flex: 1, minWidth: '200px' }}
             placeholder="Search products..."
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => { setSearch(e.target.value); setCurrentPage(1); }}
           />
           <button 
             type="button" 
             className={`btn btn-sm ${filterLowStock ? 'btn-danger' : 'btn-secondary'}`}
-            onClick={() => setFilterLowStock(!filterLowStock)}
+            onClick={() => { setFilterLowStock(!filterLowStock); setCurrentPage(1); }}
           >
             ⚠️ {filterLowStock ? 'Showing Low Stock Only' : 'Filter Low Stock'}
           </button>
@@ -272,7 +281,8 @@ export default function ProductsSection({ user, products, onAddProduct, onEditPr
             <p>No products found.</p>
           </div>
         ) : (
-          <div className="table-wrap">
+          <>
+            <div className="table-wrap">
             <table className="records-table">
               <thead>
                 <tr>
@@ -283,7 +293,7 @@ export default function ProductsSection({ user, products, onAddProduct, onEditPr
                 </tr>
               </thead>
               <tbody>
-                {filteredProducts.map((p, i) => {
+                {paginatedProducts.map((p, i) => {
                   const isLowStock = p.quantity <= 10;
                   const isEditing = p.id === editingId;
 
@@ -293,7 +303,7 @@ export default function ProductsSection({ user, products, onAddProduct, onEditPr
                       className={isLowStock ? "low-stock-row" : ""}
                       style={isLowStock ? { background: '#fef2f2', borderLeft: '4px solid var(--danger)' } : {}}
                     >
-                      <td style={{ fontWeight: 600 }}>{i + 1}</td>
+                      <td style={{ fontWeight: 600 }}>{(activePage - 1) * 10 + i + 1}</td>
                       
                       {isEditing ? (
                         <td>
@@ -368,7 +378,14 @@ export default function ProductsSection({ user, products, onAddProduct, onEditPr
               </tbody>
             </table>
           </div>
-        )}
+          <Pagination
+            currentPage={activePage}
+            totalEntries={filteredProducts.length}
+            pageSize={10}
+            onPageChange={setCurrentPage}
+          />
+        </>
+      )}
       </div>
     </div>
   );

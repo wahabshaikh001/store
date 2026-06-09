@@ -56,6 +56,44 @@ export default function App() {
     seedDefaultUsers();
   }, []);
 
+  // ── DATA MIGRATION: Patch existing orders/approvedOrders with bookType ──
+  useEffect(() => {
+    async function migrateBookType() {
+      try {
+        // Migrate pending orders
+        const ordersSnap = await getDocs(collection(db, 'orders'));
+        const orderBatch = writeBatch(db);
+        let orderUpdates = 0;
+        ordersSnap.forEach((d) => {
+          if (!d.data().bookType) {
+            orderBatch.update(d.ref, { bookType: 'Large Book' });
+            orderUpdates++;
+          }
+        });
+        if (orderUpdates > 0) await orderBatch.commit();
+
+        // Migrate approved orders
+        const approvedSnap = await getDocs(collection(db, 'approvedOrders'));
+        const approvedBatch = writeBatch(db);
+        let approvedUpdates = 0;
+        approvedSnap.forEach((d) => {
+          if (!d.data().bookType) {
+            approvedBatch.update(d.ref, { bookType: 'Large Book' });
+            approvedUpdates++;
+          }
+        });
+        if (approvedUpdates > 0) await approvedBatch.commit();
+
+        if (orderUpdates > 0 || approvedUpdates > 0) {
+          console.log(`Migration complete: ${orderUpdates} orders, ${approvedUpdates} approved orders patched with bookType.`);
+        }
+      } catch (error) {
+        console.error('Book type migration error:', error);
+      }
+    }
+    migrateBookType();
+  }, []);
+
   // Listen to pending orders real-time
   useEffect(() => {
     const q = query(collection(db, 'orders'));
@@ -306,6 +344,7 @@ export default function App() {
           date:        order.date        || '',
           productName: order.productName || '',
           quantity:    order.quantity    || 0,
+          bookType:    order.bookType    || 'Large Book',
           status:      'approved',
           approvedAt:  new Date().toISOString()
         });
