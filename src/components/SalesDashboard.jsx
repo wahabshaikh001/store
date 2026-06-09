@@ -2,11 +2,15 @@ import { useState } from 'react';
 import Pagination from './Pagination';
 
 export default function SalesDashboard({ products, records, onAddRecord, activeTab }) {
+  const [bookTab, setBookTab] = useState('Large Book');
   const [currentPage, setCurrentPage] = useState(1);
 
-  const totalPages = Math.max(1, Math.ceil(records.length / 10));
+  // Filter records by book type for the My Orders tab
+  const filteredByBook = records.filter(r => (r.bookType || 'Large Book') === bookTab);
+
+  const totalPages = Math.max(1, Math.ceil(filteredByBook.length / 10));
   const activePage = Math.min(currentPage, totalPages);
-  const paginatedRecords = records.slice((activePage - 1) * 10, activePage * 10);
+  const paginatedRecords = filteredByBook.slice((activePage - 1) * 10, activePage * 10);
 
   const [productName, setProductName] = useState('');
   const [quantity, setQuantity] = useState('');
@@ -35,6 +39,11 @@ export default function SalesDashboard({ products, records, onAddRecord, activeT
   const matchedProduct = trimmedName 
     ? products.find(p => p.name.toLowerCase() === trimmedName.toLowerCase()) 
     : null;
+
+  function handleBookTabChange(tab) {
+    setBookTab(tab);
+    setCurrentPage(1);
+  }
 
   function handleAdd(e) {
     e.preventDefault();
@@ -223,13 +232,32 @@ export default function SalesDashboard({ products, records, onAddRecord, activeT
       {activeTab === 'records' && (
         <div className="card">
           <div className="card-title">📄 My Orders</div>
-          {records.length === 0 ? (
+
+          {/* Book Type Sub-Tabs */}
+          <div className="book-tabs">
+            <button
+              className={`book-tab ${bookTab === 'Large Book' ? 'active' : ''}`}
+              onClick={() => handleBookTabChange('Large Book')}
+            >
+              📘 Large Book
+              <span className="book-tab-count">{records.filter(r => (r.bookType || 'Large Book') === 'Large Book').length}</span>
+            </button>
+            <button
+              className={`book-tab ${bookTab === 'Small Book' ? 'active' : ''}`}
+              onClick={() => handleBookTabChange('Small Book')}
+            >
+              📗 Small Book
+              <span className="book-tab-count">{records.filter(r => r.bookType === 'Small Book').length}</span>
+            </button>
+          </div>
+
+          {filteredByBook.length === 0 ? (
             <div className="no-records">
               <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                   d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
               </svg>
-              <p>No orders yet. Go to <strong>Add Order</strong> to create one.</p>
+              <p>No {bookTab} orders yet. Go to <strong>Add Order</strong> to create one.</p>
             </div>
           ) : (
             <>
@@ -265,7 +293,7 @@ export default function SalesDashboard({ products, records, onAddRecord, activeT
             </div>
             <Pagination
               currentPage={activePage}
-              totalEntries={records.length}
+              totalEntries={filteredByBook.length}
               pageSize={10}
               onPageChange={setCurrentPage}
             />
