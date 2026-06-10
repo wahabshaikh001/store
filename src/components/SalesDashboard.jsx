@@ -1,6 +1,183 @@
 import { useState } from 'react';
 import Pagination from './Pagination';
 
+/* ── Reusable order‑entry form for a specific book type ── */
+function BookOrderForm({ bookType, bookEmoji, products, onAddRecord, idPrefix }) {
+  const todayStr = () => {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  };
+
+  const [productName, setProductName] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [date, setDate] = useState(todayStr);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const filteredSuggestions = productName.trim()
+    ? products.filter(p => p.name.toLowerCase().includes(productName.toLowerCase()))
+    : [];
+
+  const trimmedName = productName.trim();
+  const matchedProduct = trimmedName
+    ? products.find(p => p.name.toLowerCase() === trimmedName.toLowerCase())
+    : null;
+
+  function handleAdd(e) {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+
+    const trimmed = productName.trim();
+    const qtyVal = parseFloat(quantity);
+
+    if (!trimmed || quantity === '') {
+      setError('Please fill in all fields.');
+      return;
+    }
+    if (isNaN(qtyVal) || qtyVal <= 0) {
+      setError('Quantity must be a positive number.');
+      return;
+    }
+    if (!date) {
+      setError('Every order must have a valid date.');
+      return;
+    }
+    if (!matchedProduct) {
+      setError('Product not available');
+      return;
+    }
+
+    onAddRecord({
+      date,
+      productName: matchedProduct.name,
+      quantity: qtyVal,
+      bookType,
+      status: 'pending'
+    });
+
+    setProductName('');
+    setQuantity('');
+    setDate(todayStr());
+    setShowSuggestions(false);
+    setSuccess('Order added successfully!');
+    setTimeout(() => setSuccess(''), 2500);
+  }
+
+  function handleSelectSuggestion(name) {
+    setProductName(name);
+    setShowSuggestions(false);
+  }
+
+  return (
+    <div className="book-order-section">
+      <div className="book-order-heading">
+        <span className="book-order-emoji">{bookEmoji}</span>
+        {bookType}
+      </div>
+
+      {error && <div className="alert alert-danger">{error}</div>}
+      {success && <div className="alert alert-success">{success}</div>}
+
+      <form onSubmit={handleAdd}>
+        <div className="add-order-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+          {/* Order Date */}
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label htmlFor={`${idPrefix}Date`}>Date</label>
+            <input
+              id={`${idPrefix}Date`}
+              type="date"
+              className="form-control"
+              value={date}
+              onChange={e => setDate(e.target.value)}
+            />
+          </div>
+
+          {/* Product Name with realtime Autocomplete */}
+          <div className="form-group" style={{ position: 'relative', marginBottom: 0 }}>
+            <label htmlFor={`${idPrefix}Product`}>Product Name</label>
+            <input
+              id={`${idPrefix}Product`}
+              type="text"
+              className="form-control"
+              placeholder="Type to search (e.g. Sugar)"
+              value={productName}
+              onChange={e => {
+                setProductName(e.target.value);
+                setShowSuggestions(true);
+              }}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+              autoComplete="off"
+            />
+
+            {trimmedName && (
+              <div style={{
+                fontSize: '0.78rem',
+                marginTop: '0.25rem',
+                fontWeight: 600,
+                color: matchedProduct ? 'var(--success-text)' : 'var(--danger)'
+              }}>
+                {matchedProduct
+                  ? `✓ Product available (Current Stock: ${matchedProduct.quantity})`
+                  : '✗ Product not available'}
+              </div>
+            )}
+
+            {showSuggestions && productName.trim().length > 0 && (
+              <div className="suggestions-dropdown">
+                {filteredSuggestions.length > 0 ? (
+                  filteredSuggestions.map(p => (
+                    <div
+                      key={p.id}
+                      className="suggestion-item"
+                      onMouseDown={e => {
+                        e.preventDefault();
+                        handleSelectSuggestion(p.name);
+                      }}
+                    >
+                      <span style={{ fontWeight: 600 }}>{p.name}</span>
+                      <span style={{
+                        fontSize: '0.75rem',
+                        color: p.quantity <= 10 ? 'var(--danger)' : 'var(--text-muted)',
+                        fontWeight: p.quantity <= 10 ? 600 : 500
+                      }}>
+                        Qty: {p.quantity}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="suggestion-no-match">No product found</div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Product Quantity */}
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label htmlFor={`${idPrefix}Qty`}>Product Quantity</label>
+            <input
+              id={`${idPrefix}Qty`}
+              type="number"
+              step="any"
+              className="form-control"
+              placeholder="e.g. 10.5"
+              value={quantity}
+              onChange={e => setQuantity(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>
+          Add {bookType} Order
+        </button>
+      </form>
+    </div>
+  );
+}
+
+/* ── Main Sales Dashboard ── */
 export default function SalesDashboard({ products, records, onAddRecord, activeTab }) {
   const [bookTab, setBookTab] = useState('Large Book');
   const [currentPage, setCurrentPage] = useState(1);
@@ -12,95 +189,9 @@ export default function SalesDashboard({ products, records, onAddRecord, activeT
   const activePage = Math.min(currentPage, totalPages);
   const paginatedRecords = filteredByBook.slice((activePage - 1) * 10, activePage * 10);
 
-  const [productName, setProductName] = useState('');
-  const [quantity, setQuantity] = useState('');
-  const [bookType, setBookType] = useState('Large Book');
-  
-  // Date picker state pre-filled with local today's date (YYYY-MM-DD format)
-  const [date, setDate] = useState(() => {
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  });
-
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-
-  // Auto-suggestions logic (case-insensitive filter)
-  const filteredSuggestions = productName.trim()
-    ? products.filter(p => p.name.toLowerCase().includes(productName.toLowerCase()))
-    : [];
-
-  // Active product check
-  const trimmedName = productName.trim();
-  const matchedProduct = trimmedName 
-    ? products.find(p => p.name.toLowerCase() === trimmedName.toLowerCase()) 
-    : null;
-
   function handleBookTabChange(tab) {
     setBookTab(tab);
     setCurrentPage(1);
-  }
-
-  function handleAdd(e) {
-    e.preventDefault();
-    setError('');
-    setSuccess('');
-
-    const trimmed = productName.trim();
-    const qtyVal = parseFloat(quantity);
-    const selectedDate = date;
-
-    if (!trimmed || quantity === '') {
-      setError('Please fill in all fields.');
-      return;
-    }
-    if (isNaN(qtyVal) || qtyVal <= 0) {
-      setError('Quantity must be a positive number.');
-      return;
-    }
-    if (!selectedDate) {
-      setError('Every order must have a valid date.');
-      return;
-    }
-
-    // 1. Verify product availability
-    if (!matchedProduct) {
-      setError('Product not available');
-      return;
-    }
-
-    // Create order with manual date and book type
-    onAddRecord({
-      date: selectedDate,
-      productName: matchedProduct.name, // standard casing
-      quantity: qtyVal,
-      bookType: bookType,
-      status: 'pending'
-    });
-
-    setProductName('');
-    setQuantity('');
-    setBookType('Large Book');
-    setShowSuggestions(false);
-    
-    // Reset date picker to today's local date
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-    setDate(`${yyyy}-${mm}-${dd}`);
-
-    setSuccess('Order added successfully!');
-    setTimeout(() => setSuccess(''), 2500);
-  }
-
-  function handleSelectSuggestion(name) {
-    setProductName(name);
-    setShowSuggestions(false);
   }
 
   return (
@@ -108,124 +199,24 @@ export default function SalesDashboard({ products, records, onAddRecord, activeT
       {activeTab === 'add' && (
         <div className="card">
           <div className="card-title">➕ Add New Order</div>
-          
-          {error && <div className="alert alert-danger">{error}</div>}
-          {success && <div className="alert alert-success">{success}</div>}
-          
-          <form onSubmit={handleAdd}>
-            <div className="add-order-grid" style={{ gridTemplateColumns: '2fr 1fr 1fr 1.2fr' }}>
-              {/* Product Name with realtime Autocomplete Dropdown */}
-              <div className="form-group" style={{ position: 'relative', marginBottom: 0 }}>
-                <label htmlFor="productSearch">Product Name</label>
-                <input
-                  id="productSearch"
-                  type="text"
-                  className="form-control"
-                  placeholder="Type to search (e.g. Sugar)"
-                  value={productName}
-                  onChange={e => {
-                    setProductName(e.target.value);
-                    setShowSuggestions(true);
-                  }}
-                  onFocus={() => setShowSuggestions(true)}
-                  onBlur={() => {
-                    // Slight delay to allow suggestion onMouseDown click to register first
-                    setTimeout(() => setShowSuggestions(false), 200);
-                  }}
-                  autoFocus
-                  autoComplete="off"
-                />
 
-                {/* Real-time indicator text */}
-                {trimmedName && (
-                  <div style={{
-                    fontSize: '0.78rem',
-                    marginTop: '0.25rem',
-                    fontWeight: 600,
-                    color: matchedProduct ? 'var(--success-text)' : 'var(--danger)'
-                  }}>
-                    {matchedProduct 
-                      ? `✓ Product available (Current Stock: ${matchedProduct.quantity})` 
-                      : `✗ Product not available`
-                    }
-                  </div>
-                )}
+          <div className="dual-order-layout">
+            <BookOrderForm
+              bookType="Small Book"
+              bookEmoji="📗"
+              products={products}
+              onAddRecord={onAddRecord}
+              idPrefix="small"
+            />
 
-                {/* Dropdown container */}
-                {showSuggestions && productName.trim().length > 0 && (
-                  <div className="suggestions-dropdown">
-                    {filteredSuggestions.length > 0 ? (
-                      filteredSuggestions.map(p => (
-                        <div
-                          key={p.id}
-                          className="suggestion-item"
-                          onMouseDown={(e) => {
-                            e.preventDefault(); // prevents blur event
-                            handleSelectSuggestion(p.name);
-                          }}
-                        >
-                          <span style={{ fontWeight: 600 }}>{p.name}</span>
-                          <span style={{ 
-                            fontSize: '0.75rem', 
-                            color: p.quantity <= 10 ? 'var(--danger)' : 'var(--text-muted)',
-                            fontWeight: p.quantity <= 10 ? 600 : 500
-                          }}>
-                            Qty: {p.quantity}
-                          </span>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="suggestion-no-match">No product found</div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Product Quantity */}
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label htmlFor="orderQuantity">Quantity</label>
-                <input
-                  id="orderQuantity"
-                  type="number"
-                  step="any"
-                  className="form-control"
-                  placeholder="e.g. 10.5"
-                  value={quantity}
-                  onChange={e => setQuantity(e.target.value)}
-                />
-              </div>
-
-              {/* Book Type Dropdown */}
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label htmlFor="bookTypeSelect">Book Type</label>
-                <select
-                  id="bookTypeSelect"
-                  className="form-control"
-                  value={bookType}
-                  onChange={e => setBookType(e.target.value)}
-                >
-                  <option value="Large Book">📘 Large Book</option>
-                  <option value="Small Book">📗 Small Book</option>
-                </select>
-              </div>
-
-              {/* Order Date Picker */}
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label htmlFor="orderDatePicker">Order Date</label>
-                <input
-                  id="orderDatePicker"
-                  type="date"
-                  className="form-control"
-                  value={date}
-                  onChange={e => setDate(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>
-              Add Order
-            </button>
-          </form>
+            <BookOrderForm
+              bookType="Large Book"
+              bookEmoji="📘"
+              products={products}
+              onAddRecord={onAddRecord}
+              idPrefix="large"
+            />
+          </div>
         </div>
       )}
 

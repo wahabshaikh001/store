@@ -524,6 +524,48 @@ html, body, #root {
 }
 
 /* =========================================
+   DUAL ORDER FORM LAYOUT
+   ========================================= */
+.dual-order-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.book-order-section {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  transition: box-shadow 0.2s ease;
+}
+.book-order-section:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.book-order-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 1rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 2px solid var(--primary-light);
+}
+
+.book-order-emoji {
+  font-size: 1.25rem;
+}
+
+@media (max-width: 768px) {
+  .dual-order-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* =========================================
    AUTO-COMPLETE SUGGESTIONS & ORDER GRID
    ========================================= */
 .add-order-grid {
