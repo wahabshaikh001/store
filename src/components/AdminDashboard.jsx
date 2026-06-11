@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import Pagination from './Pagination';
 
-export default function AdminDashboard({ records, products, onApproveRecord, onDeleteRecord, onEditRecord }) {
+export default function AdminDashboard({ records, products, onApproveRecord, onDeleteRecord, onEditRecord, onDeleteAllOrdersByBookType }) {
   const [bookTab, setBookTab] = useState('Large Book');
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -18,6 +18,9 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
   const [editDate, setEditDate] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [deleteAllLoading, setDeleteAllLoading] = useState(false);
+  const [approvingOrderId, setApprovingOrderId] = useState(null);
 
   function handleBookTabChange(tab) {
     setBookTab(tab);
@@ -25,6 +28,7 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
     setEditingOrderId(null);
     setError('');
     setSuccess('');
+    setConfirmDeleteAll(false);
   }
 
   // Start editing order
@@ -83,18 +87,22 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
 
   // Approve order
   async function handleApprove(orderId) {
+    if (approvingOrderId) return; // Already approving another order
     setError('');
     setSuccess('');
+    setApprovingOrderId(orderId);
 
     // Pre-check stock locally
     const order = records.find(r => r.id === orderId);
     if (!order) {
       setError('Order not found.');
+      setApprovingOrderId(null);
       return;
     }
     const prod = products.find(p => p.name.toLowerCase() === order.productName.toLowerCase());
     if (!prod) {
       setError('Product not found in inventory.');
+      setApprovingOrderId(null);
       return;
     }
     // Stock check bypassed to allow negative inventory
@@ -107,12 +115,60 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
       setSuccess('Order approved and stock updated successfully!');
       setTimeout(() => setSuccess(''), 2500);
     }
+    setApprovingOrderId(null);
+  }
+
+  async function handleDeleteAllByBook() {
+    if (!confirmDeleteAll) {
+      setConfirmDeleteAll(true);
+      return;
+    }
+    setDeleteAllLoading(true);
+    await onDeleteAllOrdersByBookType(bookTab);
+    setConfirmDeleteAll(false);
+    setDeleteAllLoading(false);
+    setSuccess(`All ${bookTab} orders deleted successfully.`);
+    setTimeout(() => setSuccess(''), 2500);
   }
 
   return (
     <div className="main-layout animate-fade">
       <div className="card">
-        <div className="card-title">🛡️ Pending Orders — Admin Approval</div>
+        <div
+          className="card-title"
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}
+        >
+          <span>🛡️ Pending Orders — Admin Approval</span>
+
+          {filteredByBook.length > 0 && (
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              {confirmDeleteAll && (
+                <span style={{ fontSize: '0.8rem', color: 'var(--danger)', fontWeight: 600 }}>
+                  Are you sure?
+                </span>
+              )}
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={handleDeleteAllByBook}
+                disabled={deleteAllLoading}
+              >
+                {deleteAllLoading
+                  ? 'Deleting…'
+                  : confirmDeleteAll
+                    ? `⚠️ Confirm Delete All`
+                    : `🗑️ Delete All ${bookTab} Orders`}
+              </button>
+              {confirmDeleteAll && (
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setConfirmDeleteAll(false)}
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Book Type Sub-Tabs */}
         <div className="book-tabs">
@@ -162,6 +218,7 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
               <tbody>
                 {paginatedRecords.map((r, i) => {
                   const isEditing = r.id === editingOrderId;
+                  const isApproving = r.id === approvingOrderId;
                   
                   return (
                     <tr key={r.id}>
@@ -220,10 +277,10 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
                         <button
                           className="btn btn-success btn-sm"
                           onClick={() => handleApprove(r.id)}
-                          disabled={isEditing}
-                          style={isEditing ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                          disabled={isEditing || isApproving || (approvingOrderId !== null)}
+                          style={(isEditing || isApproving || approvingOrderId !== null) ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                         >
-                          ✔ Approve
+                          {isApproving ? '⏳ Approving…' : '✔ Approve'}
                         </button>
                       </td>
 
@@ -247,6 +304,8 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
                           <button
                             className="btn btn-secondary btn-sm"
                             onClick={() => startEdit(r)}
+                            disabled={isApproving}
+                            style={isApproving ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                           >
                             ✏️ Edit
                           </button>
@@ -257,8 +316,8 @@ export default function AdminDashboard({ records, products, onApproveRecord, onD
                         <button
                           className="btn btn-danger btn-sm"
                           onClick={() => { if(window.confirm('Delete this order?')) onDeleteRecord(r.id); }}
-                          disabled={isEditing}
-                          style={isEditing ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                          disabled={isEditing || isApproving}
+                          style={(isEditing || isApproving) ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                         >
                           🗑️ Delete
                         </button>

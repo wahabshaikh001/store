@@ -77,15 +77,24 @@ export default function App() {
         const approvedBatch = writeBatch(db);
         let approvedUpdates = 0;
         approvedSnap.forEach((d) => {
-          if (!d.data().bookType) {
-            approvedBatch.update(d.ref, { bookType: 'Large Book' });
+          const data = d.data();
+          const patch = {};
+          if (!data.bookType) {
+            patch.bookType = 'Large Book';
+          }
+          // Backfill approvedAt for legacy records that lack it
+          if (!data.approvedAt) {
+            patch.approvedAt = data.date || new Date(0).toISOString();
+          }
+          if (Object.keys(patch).length > 0) {
+            approvedBatch.update(d.ref, patch);
             approvedUpdates++;
           }
         });
         if (approvedUpdates > 0) await approvedBatch.commit();
 
         if (orderUpdates > 0 || approvedUpdates > 0) {
-          console.log(`Migration complete: ${orderUpdates} orders, ${approvedUpdates} approved orders patched with bookType.`);
+          console.log(`Migration complete: ${orderUpdates} orders, ${approvedUpdates} approved orders patched.`);
         }
       } catch (error) {
         console.error('Book type migration error:', error);
@@ -142,9 +151,9 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Listen to approved orders real-time
+  // Listen to approved orders real-time — sorted by approval sequence (approvedAt)
   useEffect(() => {
-    const q = query(collection(db, 'approvedOrders'), orderBy('date', 'asc'));
+    const q = query(collection(db, 'approvedOrders'), orderBy('approvedAt', 'asc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list = [];
       snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
@@ -329,6 +338,12 @@ export default function App() {
         const orderRef = doc(db, 'orders', orderId);
         const approvedRef = doc(collection(db, 'approvedOrders'));
 
+        // Verify the pending order still exists (prevents double approval)
+        const orderSnap = await transaction.get(orderRef);
+        if (!orderSnap.exists()) {
+          throw new Error('This order has already been approved or deleted.');
+        }
+
         const prodSnap = await transaction.get(prodRef);
         if (!prodSnap.exists()) throw new Error('Product not found in database.');
 
@@ -375,6 +390,22 @@ export default function App() {
       await updateDoc(doc(db, 'orders', id), updatedData);
     } catch (err) {
       console.error('Error updating order: ', err);
+    }
+  }
+
+  async function handleDeleteAllOrdersByBookType(bookType) {
+    try {
+      const snapshot = await getDocs(collection(db, 'orders'));
+      const batch = writeBatch(db);
+      snapshot.forEach((d) => {
+        const data = d.data();
+        if ((data.bookType || 'Large Book') === bookType) {
+          batch.delete(d.ref);
+        }
+      });
+      await batch.commit();
+    } catch (err) {
+      console.error(`Error deleting all ${bookType} orders: `, err);
     }
   }
 
@@ -463,6 +494,7 @@ export default function App() {
           onApproveRecord={handleApprove}
           onDeleteRecord={handleDeleteOrder}
           onEditRecord={handleEditOrder}
+          onDeleteAllOrdersByBookType={handleDeleteAllOrdersByBookType}
         />
       ) : (
         <SalesDashboard
