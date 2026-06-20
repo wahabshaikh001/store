@@ -8,8 +8,7 @@ import {
   limit,
   startAfter,
   getDocs,
-  getCountFromServer,
-  onSnapshot
+  getCountFromServer
 } from 'firebase/firestore';
 import Pagination from './Pagination';
 
@@ -25,8 +24,7 @@ export default function ApprovedOrders({ user, onDeleteApproved, onDeleteAllAppr
 
   const pageLastDocs = useRef([null]);
   const prevBookTab = useRef(bookTab);
-  const unsubRef = useRef(null);
-  const activeSubId = useRef(0);
+  const activeRequestId = useRef(0);
 
   const totalEntries = bookTab === 'Large Book' ? largeBookCount : smallBookCount;
   const totalPages = Math.max(1, Math.ceil(totalEntries / 10));
@@ -53,128 +51,104 @@ export default function ApprovedOrders({ user, onDeleteApproved, onDeleteAllAppr
     }
   }, []);
 
-  // Subscribe to a scoped real-time listener for the current page
-  function subscribePage(targetPage, targetBookTab) {
-    const subId = ++activeSubId.current;
-    console.log(`[Firestore] [ApprovedOrders] subscribePage called. subId: ${subId}, page: ${targetPage}, bookTab: ${targetBookTab}`);
-
-    // Unsubscribe previous listener
-    if (unsubRef.current) {
-      console.log(`[Firestore] [ApprovedOrders] Unsubscribing previous listener`);
-      unsubRef.current();
-      unsubRef.current = null;
-    }
-
+  // Fetch a scoped page of approved orders
+  const fetchPageData = useCallback(async (targetPage, targetBookTab) => {
+    const requestId = ++activeRequestId.current;
     setIsFetching(true);
     setErrorMsg('');
-
     const pageSize = 10;
 
-    // We need to first resolve the startAfter cursor if needed
-    // For page 1, no cursor needed. For later pages, we need the cursor doc.
-    const setupListener = async () => {
-      try {
-        let q;
-        if (targetPage === 1) {
+    try {
+      let q;
+      if (targetPage === 1) {
+        q = query(
+          collection(db, 'approvedOrders'),
+          where('bookType', '==', targetBookTab),
+          orderBy('approvedAt', 'asc'),
+          limit(pageSize)
+        );
+      } else if (pageLastDocs.current[targetPage - 1] !== undefined && pageLastDocs.current[targetPage - 1] !== null) {
+        q = query(
+          collection(db, 'approvedOrders'),
+          where('bookType', '==', targetBookTab),
+          orderBy('approvedAt', 'asc'),
+          startAfter(pageLastDocs.current[targetPage - 1]),
+          limit(pageSize)
+        );
+      } else {
+        // Need to fetch cursor docs first via one-time query
+        const cursorQ = query(
+          collection(db, 'approvedOrders'),
+          where('bookType', '==', targetBookTab),
+          orderBy('approvedAt', 'asc'),
+          limit((targetPage - 1) * pageSize)
+        );
+        console.log(`[Firestore] [ApprovedOrders] Fetching cursors up to page ${targetPage} via getDocs`);
+        const cursorSnap = await getDocs(cursorQ);
+        if (requestId !== activeRequestId.current) return;
+
+        console.log(`[Firestore] [ApprovedOrders] Fetched cursors. Count: ${cursorSnap.size}`);
+        const cursorDocs = cursorSnap.docs;
+        // Cache intermediate page cursors
+        for (let p = 1; p < targetPage; p++) {
+          const idx = p * pageSize - 1;
+          if (idx < cursorDocs.length) {
+            pageLastDocs.current[p] = cursorDocs[idx];
+          }
+        }
+        if (cursorDocs.length > 0) {
+          q = query(
+            collection(db, 'approvedOrders'),
+            where('bookType', '==', targetBookTab),
+            orderBy('approvedAt', 'asc'),
+            startAfter(cursorDocs[cursorDocs.length - 1]),
+            limit(pageSize)
+          );
+        } else {
+          // No cursor docs means page is beyond data range
           q = query(
             collection(db, 'approvedOrders'),
             where('bookType', '==', targetBookTab),
             orderBy('approvedAt', 'asc'),
             limit(pageSize)
           );
-        } else if (pageLastDocs.current[targetPage - 1] !== undefined && pageLastDocs.current[targetPage - 1] !== null) {
-          q = query(
-            collection(db, 'approvedOrders'),
-            where('bookType', '==', targetBookTab),
-            orderBy('approvedAt', 'asc'),
-            startAfter(pageLastDocs.current[targetPage - 1]),
-            limit(pageSize)
-          );
-        } else {
-          // Need to fetch cursor docs first via one-time query
-          const cursorQ = query(
-            collection(db, 'approvedOrders'),
-            where('bookType', '==', targetBookTab),
-            orderBy('approvedAt', 'asc'),
-            limit((targetPage - 1) * pageSize)
-          );
-          console.log(`[Firestore] [ApprovedOrders] Fetching cursors up to page ${targetPage} via getDocs`);
-          const cursorSnap = await getDocs(cursorQ);
-          console.log(`[Firestore] [ApprovedOrders] Fetched cursors. Count: ${cursorSnap.size}`);
-          const cursorDocs = cursorSnap.docs;
-          // Cache intermediate page cursors
-          for (let p = 1; p < targetPage; p++) {
-            const idx = p * pageSize - 1;
-            if (idx < cursorDocs.length) {
-              pageLastDocs.current[p] = cursorDocs[idx];
-            }
-          }
-          if (cursorDocs.length > 0) {
-            q = query(
-              collection(db, 'approvedOrders'),
-              where('bookType', '==', targetBookTab),
-              orderBy('approvedAt', 'asc'),
-              startAfter(cursorDocs[cursorDocs.length - 1]),
-              limit(pageSize)
-            );
-          } else {
-            // No cursor docs means page is beyond data range
-            q = query(
-              collection(db, 'approvedOrders'),
-              where('bookType', '==', targetBookTab),
-              orderBy('approvedAt', 'asc'),
-              limit(pageSize)
-            );
-          }
         }
+      }
 
-        if (subId !== activeSubId.current) {
-          console.log(`[Firestore] [ApprovedOrders] setupListener aborted (request ${subId} is obsolete, active is ${activeSubId.current})`);
-          return;
-        }
+      console.log(`[Firestore] [ApprovedOrders] Fetching page ${targetPage} via getDocs`);
+      const snapshot = await getDocs(q);
+      if (requestId !== activeRequestId.current) return;
 
-        console.log(`[Firestore] [ApprovedOrders] Attaching onSnapshot for page ${targetPage}, bookTab: ${targetBookTab}`);
-        // Attach real-time listener to the scoped query
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-          if (subId !== activeSubId.current) {
-            console.log(`[Firestore] [ApprovedOrders] onSnapshot update ignored (subId ${subId} is obsolete). Unsubscribing.`);
-            unsubscribe();
-            return;
-          }
-          console.log(`[Firestore] [ApprovedOrders] onSnapshot update received for page ${targetPage}: ${snapshot.size} docs`);
-          const docs = snapshot.docs;
-          const list = docs.map(d => ({ id: d.id, ...d.data() }));
-          if (docs.length > 0) {
-            pageLastDocs.current[targetPage] = docs[docs.length - 1];
-          }
-          setApprovedOrders(list);
-          setIsFetching(false);
-        }, (e) => {
-          console.error(`[Firestore] [ApprovedOrders] Error in approved orders listener for page ${targetPage}:`, e);
-          if (e.message && e.message.toLowerCase().includes('index')) {
-            setErrorMsg('This view requires a Firestore composite index. Please check your developer tools console for the link to create the index, or use the link provided in the implementation plan.');
-          } else {
-            setErrorMsg('Failed to load records. Please check your network connection.');
-          }
-          setIsFetching(false);
-        });
-
-        unsubRef.current = unsubscribe;
-
-      } catch (e) {
-        console.error(`[Firestore] [ApprovedOrders] Error setting up approved orders listener for page ${targetPage}:`, e);
-        if (e.message && e.message.toLowerCase().includes('index')) {
-          setErrorMsg('This view requires a Firestore composite index. Please check your developer tools console for the link to create the index.');
-        } else {
-          setErrorMsg('Failed to load records. Please check your network connection.');
-        }
+      console.log(`[Firestore] [ApprovedOrders] Page data received for page ${targetPage}: ${snapshot.size} docs`);
+      const docs = snapshot.docs;
+      const list = docs.map(d => ({ id: d.id, ...d.data() }));
+      if (docs.length > 0) {
+        pageLastDocs.current[targetPage] = docs[docs.length - 1];
+      }
+      setApprovedOrders(list);
+    } catch (e) {
+      if (requestId !== activeRequestId.current) return;
+      console.error(`[Firestore] [ApprovedOrders] Error fetching approved orders for page ${targetPage}:`, e);
+      if (e.message && e.message.toLowerCase().includes('index')) {
+        setErrorMsg('This view requires a Firestore composite index. Please check your developer tools console for the link to create the index, or use the link provided in the implementation plan.');
+      } else {
+        setErrorMsg('Failed to load records. Please check your network connection.');
+      }
+    } finally {
+      if (requestId === activeRequestId.current) {
         setIsFetching(false);
       }
-    };
+    }
+  }, []);
 
-    setupListener();
-  }
+  // Effect to load count when bookTab changes or component mounts
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      fetchCounts();
+    });
+  }, [bookTab, fetchCounts]);
 
+  // Effect to load page data when bookTab or currentPage changes
   useEffect(() => {
     let targetPage = currentPage;
     if (prevBookTab.current !== bookTab) {
@@ -183,19 +157,10 @@ export default function ApprovedOrders({ user, onDeleteApproved, onDeleteAllAppr
       setCurrentPage(1);
       targetPage = 1;
     }
-    fetchCounts();
-    subscribePage(targetPage, bookTab);
-
-    return () => {
-      console.log(`[Firestore] [ApprovedOrders] useEffect cleanup. Invalidating active subscription ${activeSubId.current}`);
-      activeSubId.current = 0; // invalidate any pending setups
-      if (unsubRef.current) {
-        console.log(`[Firestore] [ApprovedOrders] Unsubscribing onSnapshot listener`);
-        unsubRef.current();
-        unsubRef.current = null;
-      }
-    };
-  }, [bookTab, currentPage]);
+    Promise.resolve().then(() => {
+      fetchPageData(targetPage, bookTab);
+    });
+  }, [bookTab, currentPage, fetchPageData]);
 
   const [confirmAll, setConfirmAll] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -225,16 +190,17 @@ export default function ApprovedOrders({ user, onDeleteApproved, onDeleteAllAppr
     if (window.confirm('Delete this approved order?')) {
       setLoading(true);
       await onDeleteApproved(id);
-      // Refresh counts and re-subscribe
+      // Refresh counts and re-fetch
       pageLastDocs.current.splice(currentPage);
       const newCounts = await fetchCounts();
       const newTotal = bookTab === 'Large Book' ? newCounts['Large Book'] : newCounts['Small Book'];
       const newTotalPages = Math.max(1, Math.ceil(newTotal / 10));
+      let nextPage = currentPage;
       if (currentPage > newTotalPages) {
         setCurrentPage(newTotalPages);
-      } else {
-        subscribePage(currentPage, bookTab);
+        nextPage = newTotalPages;
       }
+      fetchPageData(nextPage, bookTab);
       setLoading(false);
     }
   }

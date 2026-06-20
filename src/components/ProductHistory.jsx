@@ -7,8 +7,7 @@ import {
   limit,
   startAfter,
   getDocs,
-  getCountFromServer,
-  onSnapshot
+  getCountFromServer
 } from 'firebase/firestore';
 import Pagination from './Pagination';
 
@@ -21,8 +20,7 @@ export default function ProductHistory({ user, onDeleteHistory, onDeleteAllHisto
   const [errorMsg, setErrorMsg] = useState('');
 
   const pageLastDocs = useRef([null]);
-  const unsubRef = useRef(null);
-  const activeSubId = useRef(0);
+  const activeRequestId = useRef(0);
 
   const totalPages = Math.max(1, Math.ceil(totalEntries / 10));
   const activePage = Math.min(currentPage, totalPages);
@@ -42,126 +40,99 @@ export default function ProductHistory({ user, onDeleteHistory, onDeleteAllHisto
     }
   }, []);
 
-  // Subscribe to a scoped real-time listener for the current page
-  function subscribePage(targetPage) {
-    const subId = ++activeSubId.current;
-    console.log(`[Firestore] [ProductHistory] subscribePage called. subId: ${subId}, page: ${targetPage}`);
-
-    // Unsubscribe previous listener
-    if (unsubRef.current) {
-      console.log(`[Firestore] [ProductHistory] Unsubscribing previous listener`);
-      unsubRef.current();
-      unsubRef.current = null;
-    }
-
+  // Fetch a scoped page of product history
+  const fetchPageData = useCallback(async (targetPage) => {
+    const requestId = ++activeRequestId.current;
     setIsFetching(true);
     setErrorMsg('');
-
     const pageSize = 10;
 
-    const setupListener = async () => {
-      try {
-        let q;
-        if (targetPage === 1) {
+    try {
+      let q;
+      if (targetPage === 1) {
+        q = query(
+          collection(db, 'productHistory'),
+          orderBy('createdAt', 'desc'),
+          limit(pageSize)
+        );
+      } else if (pageLastDocs.current[targetPage - 1] !== undefined && pageLastDocs.current[targetPage - 1] !== null) {
+        q = query(
+          collection(db, 'productHistory'),
+          orderBy('createdAt', 'desc'),
+          startAfter(pageLastDocs.current[targetPage - 1]),
+          limit(pageSize)
+        );
+      } else {
+        // Need to fetch cursor docs first via one-time query
+        const cursorQ = query(
+          collection(db, 'productHistory'),
+          orderBy('createdAt', 'desc'),
+          limit((targetPage - 1) * pageSize)
+        );
+        console.log(`[Firestore] [ProductHistory] Fetching cursors up to page ${targetPage} via getDocs`);
+        const cursorSnap = await getDocs(cursorQ);
+        if (requestId !== activeRequestId.current) return;
+
+        console.log(`[Firestore] [ProductHistory] Fetched cursors. Count: ${cursorSnap.size}`);
+        const cursorDocs = cursorSnap.docs;
+        // Cache intermediate page cursors
+        for (let p = 1; p < targetPage; p++) {
+          const idx = p * pageSize - 1;
+          if (idx < cursorDocs.length) {
+            pageLastDocs.current[p] = cursorDocs[idx];
+          }
+        }
+        if (cursorDocs.length > 0) {
           q = query(
             collection(db, 'productHistory'),
             orderBy('createdAt', 'desc'),
-            limit(pageSize)
-          );
-        } else if (pageLastDocs.current[targetPage - 1] !== undefined && pageLastDocs.current[targetPage - 1] !== null) {
-          q = query(
-            collection(db, 'productHistory'),
-            orderBy('createdAt', 'desc'),
-            startAfter(pageLastDocs.current[targetPage - 1]),
+            startAfter(cursorDocs[cursorDocs.length - 1]),
             limit(pageSize)
           );
         } else {
-          // Need to fetch cursor docs first via one-time query
-          const cursorQ = query(
+          q = query(
             collection(db, 'productHistory'),
             orderBy('createdAt', 'desc'),
-            limit((targetPage - 1) * pageSize)
+            limit(pageSize)
           );
-          console.log(`[Firestore] [ProductHistory] Fetching cursors up to page ${targetPage} via getDocs`);
-          const cursorSnap = await getDocs(cursorQ);
-          console.log(`[Firestore] [ProductHistory] Fetched cursors. Count: ${cursorSnap.size}`);
-          const cursorDocs = cursorSnap.docs;
-          // Cache intermediate page cursors
-          for (let p = 1; p < targetPage; p++) {
-            const idx = p * pageSize - 1;
-            if (idx < cursorDocs.length) {
-              pageLastDocs.current[p] = cursorDocs[idx];
-            }
-          }
-          if (cursorDocs.length > 0) {
-            q = query(
-              collection(db, 'productHistory'),
-              orderBy('createdAt', 'desc'),
-              startAfter(cursorDocs[cursorDocs.length - 1]),
-              limit(pageSize)
-            );
-          } else {
-            q = query(
-              collection(db, 'productHistory'),
-              orderBy('createdAt', 'desc'),
-              limit(pageSize)
-            );
-          }
         }
+      }
 
-        if (subId !== activeSubId.current) {
-          console.log(`[Firestore] [ProductHistory] setupListener aborted (request ${subId} is obsolete, active is ${activeSubId.current})`);
-          return;
-        }
+      console.log(`[Firestore] [ProductHistory] Fetching page ${targetPage} via getDocs`);
+      const snapshot = await getDocs(q);
+      if (requestId !== activeRequestId.current) return;
 
-        console.log(`[Firestore] [ProductHistory] Attaching onSnapshot for page ${targetPage}`);
-        // Attach real-time listener to the scoped query
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-          if (subId !== activeSubId.current) {
-            console.log(`[Firestore] [ProductHistory] onSnapshot update ignored (subId ${subId} is obsolete). Unsubscribing.`);
-            unsubscribe();
-            return;
-          }
-          console.log(`[Firestore] [ProductHistory] onSnapshot update received for page ${targetPage}: ${snapshot.size} docs`);
-          const docs = snapshot.docs;
-          const list = docs.map(d => ({ id: d.id, ...d.data() }));
-          if (docs.length > 0) {
-            pageLastDocs.current[targetPage] = docs[docs.length - 1];
-          }
-          setHistoryRecords(list);
-          setIsFetching(false);
-        }, (e) => {
-          console.error(`[Firestore] [ProductHistory] Error in product history listener for page ${targetPage}:`, e);
-          setErrorMsg('Failed to load history logs. Please check your network connection.');
-          setIsFetching(false);
-        });
-
-        unsubRef.current = unsubscribe;
-
-      } catch (e) {
-        console.error(`[Firestore] [ProductHistory] Error setting up history listener for page ${targetPage}:`, e);
-        setErrorMsg('Failed to load history logs. Please check your network connection.');
+      console.log(`[Firestore] [ProductHistory] Page data received for page ${targetPage}: ${snapshot.size} docs`);
+      const docs = snapshot.docs;
+      const list = docs.map(d => ({ id: d.id, ...d.data() }));
+      if (docs.length > 0) {
+        pageLastDocs.current[targetPage] = docs[docs.length - 1];
+      }
+      setHistoryRecords(list);
+    } catch (e) {
+      if (requestId !== activeRequestId.current) return;
+      console.error(`[Firestore] [ProductHistory] Error fetching history logs for page ${targetPage}:`, e);
+      setErrorMsg('Failed to load history logs. Please check your network connection.');
+    } finally {
+      if (requestId === activeRequestId.current) {
         setIsFetching(false);
       }
-    };
+    }
+  }, []);
 
-    setupListener();
-  }
-
+  // Fetch count once on mount
   useEffect(() => {
-    fetchCount();
-    subscribePage(currentPage);
+    Promise.resolve().then(() => {
+      fetchCount();
+    });
+  }, [fetchCount]);
 
-    return () => {
-      console.log(`[Firestore] [ProductHistory] useEffect cleanup. Invalidating active subscription ${activeSubId.current}`);
-      activeSubId.current = 0; // invalidate any pending setups
-      if (unsubRef.current) {
-        console.log(`[Firestore] [ProductHistory] Unsubscribing onSnapshot listener`);
-        unsubRef.current();
-        unsubRef.current = null;
-      }
-    };
-  }, [currentPage]);
+  // Fetch page data when currentPage changes
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      fetchPageData(currentPage);
+    });
+  }, [currentPage, fetchPageData]);
 
   const [confirmAll, setConfirmAll] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -188,11 +159,12 @@ export default function ProductHistory({ user, onDeleteHistory, onDeleteAllHisto
       pageLastDocs.current.splice(currentPage);
       const newTotal = await fetchCount();
       const newTotalPages = Math.max(1, Math.ceil(newTotal / 10));
+      let nextPage = currentPage;
       if (currentPage > newTotalPages) {
         setCurrentPage(newTotalPages);
-      } else {
-        subscribePage(currentPage);
+        nextPage = newTotalPages;
       }
+      fetchPageData(nextPage);
       setLoading(false);
     }
   }

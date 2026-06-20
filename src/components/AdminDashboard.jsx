@@ -8,7 +8,8 @@ export default function AdminDashboard({
   onApproveBulkRecords,
   onDeleteRecord,
   onEditRecord,
-  onDeleteAllOrdersByBookType
+  onDeleteAllOrdersByBookType,
+  onRunMigration
 }) {
   const [bookTab, setBookTab] = useState('Large Book');
   const [currentPage, setCurrentPage] = useState(1);
@@ -32,6 +33,7 @@ export default function AdminDashboard({
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [deleteAllLoading, setDeleteAllLoading] = useState(false);
   const [approvingOrderId, setApprovingOrderId] = useState(null);
+  const [migrationLoading, setMigrationLoading] = useState(false);
 
   // Checkbox selection states
   const visibleIds = paginatedRecords.map(r => r.id);
@@ -192,6 +194,22 @@ export default function AdminDashboard({
     setTimeout(() => setSuccess(''), 2500);
   }
 
+  async function handleMigrationClick() {
+    if (!window.confirm('Run database migration? This will scan and update legacy orders and approvedOrders to ensure they have correct bookType and approvedAt attributes.')) {
+      return;
+    }
+    setMigrationLoading(true);
+    setError('');
+    setSuccess('');
+    const res = await onRunMigration();
+    if (res && res.success) {
+      setSuccess(res.message);
+    } else {
+      setError(res ? res.message : 'Migration failed.');
+    }
+    setMigrationLoading(false);
+  }
+
   return (
     <div className="main-layout animate-fade">
       <div className="card">
@@ -201,65 +219,75 @@ export default function AdminDashboard({
         >
           <span>🛡️ Pending Orders — Admin Approval</span>
 
-          {filteredByBook.length > 0 && (
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              {selectedOrderIds.length > 0 && (
-                <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
-                  {confirmBulk && (
-                    <span style={{ fontSize: '0.8rem', color: 'var(--success-text)', fontWeight: 600 }}>
-                      Are you sure you want to approve the selected orders?
-                    </span>
-                  )}
-                  <button
-                    className="btn btn-success btn-sm"
-                    onClick={handleBulkApprove}
-                    disabled={approvingBulk || approvingOrderId !== null || editingOrderId !== null}
-                  >
-                    {approvingBulk
-                      ? '⏳ Approving…'
-                      : confirmBulk
-                        ? 'Approve'
-                        : `✔️ Approve Selected (${selectedOrderIds.length})`}
-                  </button>
-                  {confirmBulk && (
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => setConfirmBulk(false)}
-                      disabled={approvingBulk}
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
-              )}
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={handleMigrationClick}
+              disabled={migrationLoading || deleteAllLoading || approvingBulk || approvingOrderId !== null}
+            >
+              {migrationLoading ? '⏳ Migrating…' : '⚡ Run DB Migration'}
+            </button>
 
-              {confirmDeleteAll && (
-                <span style={{ fontSize: '0.8rem', color: 'var(--danger)', fontWeight: 600 }}>
-                  Are you sure?
-                </span>
-              )}
-              <button
-                className="btn btn-danger btn-sm"
-                onClick={handleDeleteAllByBook}
-                disabled={deleteAllLoading || approvingBulk || approvingOrderId !== null}
-              >
-                {deleteAllLoading
-                  ? 'Deleting…'
-                  : confirmDeleteAll
-                    ? `⚠️ Confirm Delete All`
-                    : `🗑️ Delete All ${bookTab} Orders`}
-              </button>
-              {confirmDeleteAll && (
+            {filteredByBook.length > 0 && (
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                {selectedOrderIds.length > 0 && (
+                  <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+                    {confirmBulk && (
+                      <span style={{ fontSize: '0.8rem', color: 'var(--success-text)', fontWeight: 600 }}>
+                        Are you sure you want to approve the selected orders?
+                      </span>
+                    )}
+                    <button
+                      className="btn btn-success btn-sm"
+                      onClick={handleBulkApprove}
+                      disabled={approvingBulk || approvingOrderId !== null || editingOrderId !== null}
+                    >
+                      {approvingBulk
+                        ? '⏳ Approving…'
+                        : confirmBulk
+                          ? 'Approve'
+                          : `✔️ Approve Selected (${selectedOrderIds.length})`}
+                    </button>
+                    {confirmBulk && (
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setConfirmBulk(false)}
+                        disabled={approvingBulk}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {confirmDeleteAll && (
+                  <span style={{ fontSize: '0.8rem', color: 'var(--danger)', fontWeight: 600 }}>
+                    Are you sure?
+                  </span>
+                )}
                 <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => setConfirmDeleteAll(false)}
-                  disabled={deleteAllLoading}
+                  className="btn btn-danger btn-sm"
+                  onClick={handleDeleteAllByBook}
+                  disabled={deleteAllLoading || approvingBulk || approvingOrderId !== null}
                 >
-                  Cancel
+                  {deleteAllLoading
+                    ? 'Deleting…'
+                    : confirmDeleteAll
+                      ? `⚠️ Confirm Delete All`
+                      : `🗑️ Delete All ${bookTab} Orders`}
                 </button>
-              )}
-            </div>
-          )}
+                {confirmDeleteAll && (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setConfirmDeleteAll(false)}
+                    disabled={deleteAllLoading}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Book Type Sub-Tabs */}

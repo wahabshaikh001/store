@@ -14,6 +14,12 @@ export default function Navbar({ user, activeTab, setActiveTab, onChangePassword
             Products
           </button>
           <button
+            className={`nav-link ${activeTab === 'approvals' ? 'active' : ''}`}
+            onClick={() => setActiveTab('approvals')}
+          >
+            ⚖️ Product Approvals
+          </button>
+          <button
             className={`nav-link ${activeTab === 'add' ? 'active' : ''}`}
             onClick={() => setActiveTab('add')}
           >

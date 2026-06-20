@@ -7,6 +7,7 @@ import AdminDashboard from './components/AdminDashboard';
 import ProductsSection from './components/ProductsSection';
 import ApprovedOrders from './components/ApprovedOrders';
 import ProductHistory from './components/ProductHistory';
+import ProductApprovals from './components/ProductApprovals';
 import ChangePasswordModal from './components/ChangePasswordModal';
 import { db } from './firebase';
 import {
@@ -30,6 +31,7 @@ export default function App() {
   const [user, setUser]               = useState(() => getSession());
   const [records, setRecords]         = useState([]);
   const [products, setProducts]       = useState([]);
+  const [approvals, setApprovals]     = useState([]);
   const [activeTab, setActiveTab]     = useState('products');
   const [pwdOpen, setPwdOpen]         = useState(false);
 
@@ -60,64 +62,55 @@ export default function App() {
     seedDefaultUsers();
   }, []);
 
-  // ── DATA MIGRATION: Patch existing orders/approvedOrders with bookType ──
-  useEffect(() => {
-    if (localStorage.getItem('migration_bookType_done') === 'true') {
-      return;
-    }
-    async function migrateBookType() {
-      try {
-        console.log('[Firestore] Starting bookType data migration...');
-        // Migrate pending orders
-        const ordersSnap = await getDocs(collection(db, 'orders'));
-        console.log(`[Firestore] Migration read ${ordersSnap.size} pending orders`);
-        const orderBatch = writeBatch(db);
-        let orderUpdates = 0;
-        ordersSnap.forEach((d) => {
-          if (!d.data().bookType) {
-            orderBatch.update(d.ref, { bookType: 'Large Book' });
-            orderUpdates++;
-          }
-        });
-        if (orderUpdates > 0) await orderBatch.commit();
+  // ── MANUAL DATA MIGRATION: Patch existing orders/approvedOrders with bookType ──
+  async function handleRunMigration() {
+    try {
+      console.log('[Firestore] Starting manual bookType data migration...');
+      // Migrate pending orders
+      const ordersSnap = await getDocs(collection(db, 'orders'));
+      const orderBatch = writeBatch(db);
+      let orderUpdates = 0;
+      ordersSnap.forEach((d) => {
+        if (!d.data().bookType) {
+          orderBatch.update(d.ref, { bookType: 'Large Book' });
+          orderUpdates++;
+        }
+      });
+      if (orderUpdates > 0) await orderBatch.commit();
 
-        // Migrate approved orders
-        const approvedSnap = await getDocs(collection(db, 'approvedOrders'));
-        console.log(`[Firestore] Migration read ${approvedSnap.size} approved orders`);
-        const approvedBatch = writeBatch(db);
-        let approvedUpdates = 0;
-        approvedSnap.forEach((d) => {
-          const data = d.data();
-          const patch = {};
-          if (!data.bookType) {
-            patch.bookType = 'Large Book';
-          }
-          // Backfill approvedAt for legacy records that lack it
-          if (!data.approvedAt) {
-            patch.approvedAt = data.date || new Date(0).toISOString();
-          }
-          if (Object.keys(patch).length > 0) {
-            approvedBatch.update(d.ref, patch);
-            approvedUpdates++;
-          }
-        });
-        if (approvedUpdates > 0) await approvedBatch.commit();
+      // Migrate approved orders
+      const approvedSnap = await getDocs(collection(db, 'approvedOrders'));
+      const approvedBatch = writeBatch(db);
+      let approvedUpdates = 0;
+      approvedSnap.forEach((d) => {
+        const data = d.data();
+        const patch = {};
+        if (!data.bookType) {
+          patch.bookType = 'Large Book';
+        }
+        // Backfill approvedAt for legacy records that lack it
+        if (!data.approvedAt) {
+          patch.approvedAt = data.date || new Date(0).toISOString();
+        }
+        if (Object.keys(patch).length > 0) {
+          approvedBatch.update(d.ref, patch);
+          approvedUpdates++;
+        }
+      });
+      if (approvedUpdates > 0) await approvedBatch.commit();
 
-        localStorage.setItem('migration_bookType_done', 'true');
-        console.log(`[Firestore] Migration complete: ${orderUpdates} orders, ${approvedUpdates} approved orders patched.`);
-      } catch (error) {
-        console.error('Book type migration error:', error);
-      }
+      localStorage.setItem('migration_bookType_done', 'true');
+      console.log(`[Firestore] Migration complete: ${orderUpdates} orders, ${approvedUpdates} approved orders patched.`);
+      return { success: true, message: `Migration complete: ${orderUpdates} orders, ${approvedUpdates} approved orders patched.` };
+    } catch (error) {
+      console.error('Book type migration error:', error);
+      return { success: false, message: error.message || 'Migration failed.' };
     }
-    migrateBookType();
-  }, []);
+  }
 
   // Listen to pending orders real-time (only when logged in)
   useEffect(() => {
-    if (!user) {
-      setRecords([]);
-      return;
-    }
+    if (!user) return;
     console.log('[Firestore] Attaching real-time listener for pending orders');
     const q = query(collection(db, 'orders'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -171,10 +164,7 @@ export default function App() {
 
   // Listen to products real-time (only when logged in)
   useEffect(() => {
-    if (!user) {
-      setProducts([]);
-      return;
-    }
+    if (!user) return;
     console.log('[Firestore] Attaching real-time listener for products');
     const q = query(collection(db, 'products'), orderBy('name', 'asc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -189,6 +179,23 @@ export default function App() {
     };
   }, [user]);
 
+  // Listen to product approvals real-time (only when logged in)
+  useEffect(() => {
+    if (!user) return;
+    console.log('[Firestore] Attaching real-time listener for product approvals');
+    const q = query(collection(db, 'productApprovals'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      console.log(`[Firestore] Product approvals update received: ${snapshot.size} records`);
+      const list = [];
+      snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setApprovals(list);
+    });
+    return () => {
+      console.log('[Firestore] Detaching real-time listener for product approvals');
+      unsubscribe();
+    };
+  }, [user]);
+
   function handleLogin(session) {
     setUser(session);
     setActiveTab('products');
@@ -197,9 +204,12 @@ export default function App() {
   function handleLogout() {
     setSession(null);
     setUser(null);
+    setRecords([]);
+    setProducts([]);
+    setApprovals([]);
   }
 
-  // ── PRODUCT ACTIONS ──────────────────────────────────────
+  // ── PRODUCT APPROVAL ACTIONS ──────────────────────────────
   async function handleAddProduct(data) {
     try {
       const today = new Date();
@@ -208,50 +218,16 @@ export default function App() {
       const dd = String(today.getDate()).padStart(2, '0');
       const dateStr = `${yyyy}-${mm}-${dd}`;
 
-      await runTransaction(db, async (transaction) => {
-        const existingLocal = products.find(
-          (p) => p.name.toLowerCase() === data.name.trim().toLowerCase()
-        );
-
-        let targetProductRef;
-        let isNew = true;
-        let newQty = data.quantity;
-        let finalProductName = data.name.trim();
-
-        if (existingLocal) {
-          targetProductRef = doc(db, 'products', existingLocal.id);
-          const docSnap = await transaction.get(targetProductRef);
-          if (docSnap.exists()) {
-            isNew = false;
-            const currentQty = docSnap.data().quantity || 0;
-            newQty = Number((currentQty + data.quantity).toFixed(4));
-            finalProductName = docSnap.data().name || finalProductName;
-          }
-        }
-
-        if (isNew) {
-          const newProdRef = doc(collection(db, 'products'));
-          transaction.set(newProdRef, {
-            name: finalProductName,
-            quantity: data.quantity,
-            createdAt: serverTimestamp()
-          });
-        } else {
-          transaction.update(targetProductRef, {
-            quantity: newQty
-          });
-        }
-
-        const historyRef = doc(collection(db, 'productHistory'));
-        transaction.set(historyRef, {
-          productName: finalProductName,
-          quantityAdded: data.quantity,
-          date: dateStr,
-          createdAt: new Date().toISOString()
-        });
+      console.log('[Firestore] Submitting product request for approval...');
+      await addDoc(collection(db, 'productApprovals'), {
+        productName: data.name.trim(),
+        quantity: data.quantity,
+        actionType: 'New Product',
+        date: dateStr,
+        createdAt: new Date().toISOString()
       });
     } catch (err) {
-      console.error('Error adding product: ', err);
+      console.error('Error creating product approval request: ', err);
     }
   }
 
@@ -263,30 +239,254 @@ export default function App() {
       const dd = String(today.getDate()).padStart(2, '0');
       const dateStr = `${yyyy}-${mm}-${dd}`;
 
-      await runTransaction(db, async (transaction) => {
-        const prodRef = doc(db, 'products', id);
-        const prodSnap = await transaction.get(prodRef);
-        if (!prodSnap.exists()) throw new Error('Product not found.');
-
-        const prevData = prodSnap.data();
-        const prevQty = prevData.quantity || 0;
-        const newQty = data.quantity || 0;
-
-        transaction.update(prodRef, data);
-
-        if (newQty > prevQty) {
-          const qtyAdded = Number((newQty - prevQty).toFixed(4));
-          const historyRef = doc(collection(db, 'productHistory'));
-          transaction.set(historyRef, {
-            productName: data.name || prevData.name,
-            quantityAdded: qtyAdded,
-            date: dateStr,
-            createdAt: new Date().toISOString()
-          });
-        }
+      console.log('[Firestore] Submitting product update request for approval...');
+      await addDoc(collection(db, 'productApprovals'), {
+        productId: id,
+        productName: data.name.trim(),
+        quantity: data.quantity,
+        actionType: 'Product Update',
+        date: dateStr,
+        createdAt: new Date().toISOString()
       });
     } catch (err) {
-      console.error('Error updating product: ', err);
+      console.error('Error creating product update request: ', err);
+    }
+  }
+
+  async function handleApproveProduct(approvalId) {
+    try {
+      const approvalRef = doc(db, 'productApprovals', approvalId);
+      
+      const result = await runTransaction(db, async (transaction) => {
+        const approvalSnap = await transaction.get(approvalRef);
+        if (!approvalSnap.exists()) {
+          throw new Error('Approval request not found.');
+        }
+        
+        const reqData = approvalSnap.data();
+        const actionType = reqData.actionType;
+        const reqName = reqData.productName;
+        const reqQty = reqData.quantity;
+        const reqDate = reqData.date || new Date().toISOString().split('T')[0];
+
+        if (actionType === 'New Product') {
+          const existingLocal = products.find(
+            (p) => p.name.toLowerCase() === reqName.toLowerCase()
+          );
+
+          let targetProductRef;
+          let isNew = true;
+          let newQty = reqQty;
+          let finalProductName = reqName;
+
+          if (existingLocal) {
+            targetProductRef = doc(db, 'products', existingLocal.id);
+            const docSnap = await transaction.get(targetProductRef);
+            if (docSnap.exists()) {
+              isNew = false;
+              const currentQty = docSnap.data().quantity || 0;
+              newQty = Number((currentQty + reqQty).toFixed(4));
+              finalProductName = docSnap.data().name || finalProductName;
+            }
+          }
+
+          if (isNew) {
+            const newProdRef = doc(collection(db, 'products'));
+            transaction.set(newProdRef, {
+              name: finalProductName,
+              quantity: reqQty,
+              createdAt: serverTimestamp()
+            });
+          } else {
+            transaction.update(targetProductRef, {
+              quantity: newQty
+            });
+          }
+
+          const historyRef = doc(collection(db, 'productHistory'));
+          transaction.set(historyRef, {
+            productName: finalProductName,
+            quantityAdded: reqQty,
+            date: reqDate,
+            createdAt: new Date().toISOString()
+          });
+
+        } else if (actionType === 'Product Update') {
+          const prodId = reqData.productId;
+          if (!prodId) throw new Error('Product ID missing in update request.');
+
+          const prodRef = doc(db, 'products', prodId);
+          const prodSnap = await transaction.get(prodRef);
+          if (!prodSnap.exists()) {
+            throw new Error('Original product not found.');
+          }
+
+          const prevData = prodSnap.data();
+          const prevQty = prevData.quantity || 0;
+          
+          transaction.update(prodRef, {
+            name: reqName,
+            quantity: reqQty
+          });
+
+          if (reqQty > prevQty) {
+            const qtyAdded = Number((reqQty - prevQty).toFixed(4));
+            const historyRef = doc(collection(db, 'productHistory'));
+            transaction.set(historyRef, {
+              productName: reqName,
+              quantityAdded: qtyAdded,
+              date: reqDate,
+              createdAt: new Date().toISOString()
+            });
+          }
+        }
+
+        transaction.delete(approvalRef);
+        return { success: true };
+      });
+
+      return result;
+    } catch (err) {
+      console.error('Error approving product request:', err);
+      return { success: false, message: err.message || 'Approval failed.' };
+    }
+  }
+
+  async function handleDeleteProductApproval(approvalId) {
+    try {
+      await deleteDoc(doc(db, 'productApprovals', approvalId));
+      return { success: true };
+    } catch (err) {
+      console.error('Error deleting product approval request:', err);
+      return { success: false, message: err.message || 'Deletion failed.' };
+    }
+  }
+
+  async function handleBulkApproveProducts(approvalIds) {
+    if (!approvalIds || approvalIds.length === 0) return { success: false, message: 'No requests selected.' };
+
+    try {
+      const result = await runTransaction(db, async (transaction) => {
+        const approvalRefs = approvalIds.map(id => doc(db, 'productApprovals', id));
+        const approvalSnaps = await Promise.all(approvalRefs.map(ref => transaction.get(ref)));
+
+        const approvalsData = [];
+        for (const snap of approvalSnaps) {
+          if (!snap.exists()) {
+            throw new Error('One or more selected requests were not found.');
+          }
+          approvalsData.push({ id: snap.id, ...snap.data() });
+        }
+
+        const productIdsToGet = new Set();
+        const productNamesToCheck = new Set();
+        
+        approvalsData.forEach(req => {
+          if (req.actionType === 'Product Update' && req.productId) {
+            productIdsToGet.add(req.productId);
+          } else if (req.actionType === 'New Product') {
+            productNamesToCheck.add(req.productName.toLowerCase());
+          }
+        });
+
+        products.forEach(p => {
+          if (productNamesToCheck.has(p.name.toLowerCase())) {
+            productIdsToGet.add(p.id);
+          }
+        });
+
+        const productRefsList = Array.from(productIdsToGet).map(id => doc(db, 'products', id));
+        const productSnaps = await Promise.all(productRefsList.map(ref => transaction.get(ref)));
+
+        const productMap = {};
+        productSnaps.forEach(snap => {
+          if (snap.exists()) {
+            const data = snap.data();
+            productMap[snap.id] = { ref: snap.ref, data: { ...data } };
+            productMap[data.name.toLowerCase()] = { ref: snap.ref, data: { ...data } };
+          }
+        });
+
+        for (const req of approvalsData) {
+          const reqName = req.productName;
+          const reqQty = req.quantity;
+          const reqDate = req.date || new Date().toISOString().split('T')[0];
+
+          if (req.actionType === 'New Product') {
+            const nameLower = reqName.toLowerCase();
+            const existingProduct = productMap[nameLower];
+
+            if (existingProduct) {
+              const currentQty = existingProduct.data.quantity || 0;
+              const newQty = Number((currentQty + reqQty).toFixed(4));
+              existingProduct.data.quantity = newQty;
+              
+              transaction.update(existingProduct.ref, { quantity: newQty });
+
+              const historyRef = doc(collection(db, 'productHistory'));
+              transaction.set(historyRef, {
+                productName: existingProduct.data.name || reqName,
+                quantityAdded: reqQty,
+                date: reqDate,
+                createdAt: new Date().toISOString()
+              });
+            } else {
+              const newProdRef = doc(collection(db, 'products'));
+              const newProductData = {
+                name: reqName,
+                quantity: reqQty,
+                createdAt: serverTimestamp()
+              };
+              transaction.set(newProdRef, newProductData);
+              productMap[nameLower] = { ref: newProdRef, data: newProductData };
+
+              const historyRef = doc(collection(db, 'productHistory'));
+              transaction.set(historyRef, {
+                productName: reqName,
+                quantityAdded: reqQty,
+                date: reqDate,
+                createdAt: new Date().toISOString()
+              });
+            }
+          } else if (req.actionType === 'Product Update') {
+            const prodId = req.productId;
+            const existingProduct = productMap[prodId];
+            if (!existingProduct) {
+              throw new Error(`Original product for "${reqName}" not found.`);
+            }
+
+            const prevQty = existingProduct.data.quantity || 0;
+            existingProduct.data.quantity = reqQty;
+            existingProduct.data.name = reqName;
+
+            transaction.update(existingProduct.ref, {
+              name: reqName,
+              quantity: reqQty
+            });
+
+            if (reqQty > prevQty) {
+              const qtyAdded = Number((reqQty - prevQty).toFixed(4));
+              const historyRef = doc(collection(db, 'productHistory'));
+              transaction.set(historyRef, {
+                productName: reqName,
+                quantityAdded: qtyAdded,
+                date: reqDate,
+                createdAt: new Date().toISOString()
+              });
+            }
+          }
+
+          const reqRef = doc(db, 'productApprovals', req.id);
+          transaction.delete(reqRef);
+        }
+
+        return { success: true };
+      });
+
+      return result;
+    } catch (err) {
+      console.error('Bulk approval failed:', err);
+      return { success: false, message: err.message || 'Bulk approval failed.' };
     }
   }
 
@@ -561,6 +761,14 @@ export default function App() {
           onDeleteApproved={handleDeleteApproved}
           onDeleteAllApproved={handleDeleteAllApproved}
         />
+      ) : activeTab === 'approvals' ? (
+        <ProductApprovals
+          user={user}
+          approvals={approvals}
+          onApprove={handleApproveProduct}
+          onDelete={handleDeleteProductApproval}
+          onApproveBulk={handleBulkApproveProducts}
+        />
       ) : activeTab === 'history' ? (
         <ProductHistory
           user={user}
@@ -576,6 +784,7 @@ export default function App() {
           onDeleteRecord={handleDeleteOrder}
           onEditRecord={handleEditOrder}
           onDeleteAllOrdersByBookType={handleDeleteAllOrdersByBookType}
+          onRunMigration={handleRunMigration}
         />
       ) : (
         <SalesDashboard
