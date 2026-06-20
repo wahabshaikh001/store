@@ -1,13 +1,167 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { db } from '../firebase';
+import {
+  collection,
+  query,
+  orderBy,
+  limit,
+  startAfter,
+  getDocs,
+  getCountFromServer,
+  onSnapshot
+} from 'firebase/firestore';
 import Pagination from './Pagination';
 
-export default function ProductHistory({ user, historyRecords, onDeleteHistory, onDeleteAllHistory }) {
+export default function ProductHistory({ user, onDeleteHistory, onDeleteAllHistory }) {
   const isAdmin = user?.role === 'admin';
   const [currentPage, setCurrentPage] = useState(1);
+  const [historyRecords, setHistoryRecords] = useState([]);
+  const [totalEntries, setTotalEntries] = useState(0);
+  const [isFetching, setIsFetching] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  const totalPages = Math.max(1, Math.ceil(historyRecords.length / 10));
+  const pageLastDocs = useRef([null]);
+  const unsubRef = useRef(null);
+  const activeSubId = useRef(0);
+
+  const totalPages = Math.max(1, Math.ceil(totalEntries / 10));
   const activePage = Math.min(currentPage, totalPages);
-  const paginatedHistory = historyRecords.slice((activePage - 1) * 10, activePage * 10);
+
+  const fetchCount = useCallback(async () => {
+    try {
+      console.log('[Firestore] [ProductHistory] Fetching total history count...');
+      const q = collection(db, 'productHistory');
+      const snap = await getCountFromServer(q);
+      const count = snap.data().count;
+      console.log(`[Firestore] [ProductHistory] Total count fetched: ${count}`);
+      setTotalEntries(count);
+      return count;
+    } catch (e) {
+      console.error("[Firestore] [ProductHistory] Error fetching history count:", e);
+      return 0;
+    }
+  }, []);
+
+  // Subscribe to a scoped real-time listener for the current page
+  function subscribePage(targetPage) {
+    const subId = ++activeSubId.current;
+    console.log(`[Firestore] [ProductHistory] subscribePage called. subId: ${subId}, page: ${targetPage}`);
+
+    // Unsubscribe previous listener
+    if (unsubRef.current) {
+      console.log(`[Firestore] [ProductHistory] Unsubscribing previous listener`);
+      unsubRef.current();
+      unsubRef.current = null;
+    }
+
+    setIsFetching(true);
+    setErrorMsg('');
+
+    const pageSize = 10;
+
+    const setupListener = async () => {
+      try {
+        let q;
+        if (targetPage === 1) {
+          q = query(
+            collection(db, 'productHistory'),
+            orderBy('createdAt', 'desc'),
+            limit(pageSize)
+          );
+        } else if (pageLastDocs.current[targetPage - 1] !== undefined && pageLastDocs.current[targetPage - 1] !== null) {
+          q = query(
+            collection(db, 'productHistory'),
+            orderBy('createdAt', 'desc'),
+            startAfter(pageLastDocs.current[targetPage - 1]),
+            limit(pageSize)
+          );
+        } else {
+          // Need to fetch cursor docs first via one-time query
+          const cursorQ = query(
+            collection(db, 'productHistory'),
+            orderBy('createdAt', 'desc'),
+            limit((targetPage - 1) * pageSize)
+          );
+          console.log(`[Firestore] [ProductHistory] Fetching cursors up to page ${targetPage} via getDocs`);
+          const cursorSnap = await getDocs(cursorQ);
+          console.log(`[Firestore] [ProductHistory] Fetched cursors. Count: ${cursorSnap.size}`);
+          const cursorDocs = cursorSnap.docs;
+          // Cache intermediate page cursors
+          for (let p = 1; p < targetPage; p++) {
+            const idx = p * pageSize - 1;
+            if (idx < cursorDocs.length) {
+              pageLastDocs.current[p] = cursorDocs[idx];
+            }
+          }
+          if (cursorDocs.length > 0) {
+            q = query(
+              collection(db, 'productHistory'),
+              orderBy('createdAt', 'desc'),
+              startAfter(cursorDocs[cursorDocs.length - 1]),
+              limit(pageSize)
+            );
+          } else {
+            q = query(
+              collection(db, 'productHistory'),
+              orderBy('createdAt', 'desc'),
+              limit(pageSize)
+            );
+          }
+        }
+
+        if (subId !== activeSubId.current) {
+          console.log(`[Firestore] [ProductHistory] setupListener aborted (request ${subId} is obsolete, active is ${activeSubId.current})`);
+          return;
+        }
+
+        console.log(`[Firestore] [ProductHistory] Attaching onSnapshot for page ${targetPage}`);
+        // Attach real-time listener to the scoped query
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+          if (subId !== activeSubId.current) {
+            console.log(`[Firestore] [ProductHistory] onSnapshot update ignored (subId ${subId} is obsolete). Unsubscribing.`);
+            unsubscribe();
+            return;
+          }
+          console.log(`[Firestore] [ProductHistory] onSnapshot update received for page ${targetPage}: ${snapshot.size} docs`);
+          const docs = snapshot.docs;
+          const list = docs.map(d => ({ id: d.id, ...d.data() }));
+          if (docs.length > 0) {
+            pageLastDocs.current[targetPage] = docs[docs.length - 1];
+          }
+          setHistoryRecords(list);
+          setIsFetching(false);
+        }, (e) => {
+          console.error(`[Firestore] [ProductHistory] Error in product history listener for page ${targetPage}:`, e);
+          setErrorMsg('Failed to load history logs. Please check your network connection.');
+          setIsFetching(false);
+        });
+
+        unsubRef.current = unsubscribe;
+
+      } catch (e) {
+        console.error(`[Firestore] [ProductHistory] Error setting up history listener for page ${targetPage}:`, e);
+        setErrorMsg('Failed to load history logs. Please check your network connection.');
+        setIsFetching(false);
+      }
+    };
+
+    setupListener();
+  }
+
+  useEffect(() => {
+    fetchCount();
+    subscribePage(currentPage);
+
+    return () => {
+      console.log(`[Firestore] [ProductHistory] useEffect cleanup. Invalidating active subscription ${activeSubId.current}`);
+      activeSubId.current = 0; // invalidate any pending setups
+      if (unsubRef.current) {
+        console.log(`[Firestore] [ProductHistory] Unsubscribing onSnapshot listener`);
+        unsubRef.current();
+        unsubRef.current = null;
+      }
+    };
+  }, [currentPage]);
 
   const [confirmAll, setConfirmAll] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -19,8 +173,28 @@ export default function ProductHistory({ user, historyRecords, onDeleteHistory, 
     }
     setLoading(true);
     await onDeleteAllHistory();
+    setHistoryRecords([]);
+    setTotalEntries(0);
+    pageLastDocs.current = [null];
+    setCurrentPage(1);
     setConfirmAll(false);
     setLoading(false);
+  }
+
+  async function handleSingleDelete(id) {
+    if (window.confirm('Delete this history record?')) {
+      setLoading(true);
+      await onDeleteHistory(id);
+      pageLastDocs.current.splice(currentPage);
+      const newTotal = await fetchCount();
+      const newTotalPages = Math.max(1, Math.ceil(newTotal / 10));
+      if (currentPage > newTotalPages) {
+        setCurrentPage(newTotalPages);
+      } else {
+        subscribePage(currentPage);
+      }
+      setLoading(false);
+    }
   }
 
   return (
@@ -33,7 +207,7 @@ export default function ProductHistory({ user, historyRecords, onDeleteHistory, 
         >
           <span>📋 Product History List</span>
 
-          {isAdmin && historyRecords.length > 0 && (
+          {isAdmin && totalEntries > 0 && (
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               {confirmAll && (
                 <span style={{ fontSize: '0.8rem', color: 'var(--danger)', fontWeight: 600 }}>
@@ -43,7 +217,7 @@ export default function ProductHistory({ user, historyRecords, onDeleteHistory, 
               <button
                 className="btn btn-danger btn-sm"
                 onClick={handleDeleteAll}
-                disabled={loading}
+                disabled={loading || isFetching}
               >
                 {loading ? 'Deleting…' : confirmAll ? '⚠️ Confirm Delete All' : '🗑️ Delete All History'}
               </button>
@@ -59,7 +233,13 @@ export default function ProductHistory({ user, historyRecords, onDeleteHistory, 
           )}
         </div>
 
-        {historyRecords.length === 0 ? (
+        {errorMsg && <div className="alert alert-danger">{errorMsg}</div>}
+
+        {isFetching && historyRecords.length === 0 ? (
+          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+            Loading history…
+          </div>
+        ) : totalEntries === 0 ? (
           <div className="no-records">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
@@ -70,50 +250,47 @@ export default function ProductHistory({ user, historyRecords, onDeleteHistory, 
         ) : (
           <>
             <div className="table-wrap">
-            <table className="records-table">
-              <thead>
-                <tr>
-                  <th style={{ width: '60px' }}>S/No</th>
-                  <th>Date</th>
-                  <th>Product Name</th>
-                  <th>Quantity Added</th>
-                  {isAdmin && <th style={{ width: '110px' }}>Delete</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedHistory.map((r, i) => (
-                  <tr key={r.id}>
-                    <td style={{ fontWeight: 600 }}>{(activePage - 1) * 10 + i + 1}</td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{r.date || '—'}</td>
-                    <td style={{ fontWeight: 500 }}>{r.productName}</td>
-                    <td style={{ fontWeight: 600, color: 'var(--primary)' }}>+{r.quantityAdded}</td>
-                    {isAdmin && (
-                      <td>
-                        <button
-                          className="btn btn-danger btn-sm"
-                          onClick={() => {
-                            if (window.confirm('Delete this history record?')) {
-                              onDeleteHistory(r.id);
-                            }
-                          }}
-                        >
-                          🗑️ Delete
-                        </button>
-                      </td>
-                    )}
+              <table className="records-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: '60px' }}>S/No</th>
+                    <th>Date</th>
+                    <th>Product Name</th>
+                    <th>Quantity Added</th>
+                    {isAdmin && <th style={{ width: '110px' }}>Delete</th>}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <Pagination
-            currentPage={activePage}
-            totalEntries={historyRecords.length}
-            pageSize={10}
-            onPageChange={setCurrentPage}
-          />
-        </>
-      )}
+                </thead>
+                <tbody>
+                  {historyRecords.map((r, i) => (
+                    <tr key={r.id}>
+                      <td style={{ fontWeight: 600 }}>{(activePage - 1) * 10 + i + 1}</td>
+                      <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{r.date || '—'}</td>
+                      <td style={{ fontWeight: 500 }}>{r.productName}</td>
+                      <td style={{ fontWeight: 600, color: 'var(--primary)' }}>+{r.quantityAdded}</td>
+                      {isAdmin && (
+                        <td>
+                          <button
+                            className="btn btn-danger btn-sm"
+                            onClick={() => handleSingleDelete(r.id)}
+                            disabled={loading || isFetching}
+                          >
+                            🗑️ Delete
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination
+              currentPage={activePage}
+              totalEntries={totalEntries}
+              pageSize={10}
+              onPageChange={setCurrentPage}
+            />
+          </>
+        )}
       </div>
     </div>
   );

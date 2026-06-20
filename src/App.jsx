@@ -30,15 +30,17 @@ export default function App() {
   const [user, setUser]               = useState(() => getSession());
   const [records, setRecords]         = useState([]);
   const [products, setProducts]       = useState([]);
-  const [approvedOrders, setApprovedOrders] = useState([]);
-  const [historyRecords, setHistoryRecords] = useState([]);
   const [activeTab, setActiveTab]     = useState('products');
   const [pwdOpen, setPwdOpen]         = useState(false);
 
   // Seed default users if they do not exist
   useEffect(() => {
+    if (localStorage.getItem('seed_users_done') === 'true') {
+      return;
+    }
     async function seedDefaultUsers() {
       try {
+        console.log('[Firestore] Checking if default users exist...');
         const adminRef = doc(db, 'users', 'admin');
         const salesRef = doc(db, 'users', 'sales');
         const adminSnap = await getDoc(adminRef);
@@ -49,6 +51,8 @@ export default function App() {
         if (!salesSnap.exists()) {
           await setDoc(salesRef, { username: 'sales', password: '1234', role: 'sales' });
         }
+        localStorage.setItem('seed_users_done', 'true');
+        console.log('[Firestore] Default users check complete.');
       } catch (error) {
         console.error('Error seeding users: ', error);
       }
@@ -58,10 +62,15 @@ export default function App() {
 
   // ── DATA MIGRATION: Patch existing orders/approvedOrders with bookType ──
   useEffect(() => {
+    if (localStorage.getItem('migration_bookType_done') === 'true') {
+      return;
+    }
     async function migrateBookType() {
       try {
+        console.log('[Firestore] Starting bookType data migration...');
         // Migrate pending orders
         const ordersSnap = await getDocs(collection(db, 'orders'));
+        console.log(`[Firestore] Migration read ${ordersSnap.size} pending orders`);
         const orderBatch = writeBatch(db);
         let orderUpdates = 0;
         ordersSnap.forEach((d) => {
@@ -74,6 +83,7 @@ export default function App() {
 
         // Migrate approved orders
         const approvedSnap = await getDocs(collection(db, 'approvedOrders'));
+        console.log(`[Firestore] Migration read ${approvedSnap.size} approved orders`);
         const approvedBatch = writeBatch(db);
         let approvedUpdates = 0;
         approvedSnap.forEach((d) => {
@@ -93,9 +103,8 @@ export default function App() {
         });
         if (approvedUpdates > 0) await approvedBatch.commit();
 
-        if (orderUpdates > 0 || approvedUpdates > 0) {
-          console.log(`Migration complete: ${orderUpdates} orders, ${approvedUpdates} approved orders patched.`);
-        }
+        localStorage.setItem('migration_bookType_done', 'true');
+        console.log(`[Firestore] Migration complete: ${orderUpdates} orders, ${approvedUpdates} approved orders patched.`);
       } catch (error) {
         console.error('Book type migration error:', error);
       }
@@ -103,10 +112,16 @@ export default function App() {
     migrateBookType();
   }, []);
 
-  // Listen to pending orders real-time
+  // Listen to pending orders real-time (only when logged in)
   useEffect(() => {
+    if (!user) {
+      setRecords([]);
+      return;
+    }
+    console.log('[Firestore] Attaching real-time listener for pending orders');
     const q = query(collection(db, 'orders'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      console.log(`[Firestore] Pending orders update received: ${snapshot.size} records`);
       const list = [];
       snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
       
@@ -148,41 +163,31 @@ export default function App() {
       
       setRecords(list);
     });
-    return () => unsubscribe();
-  }, []);
+    return () => {
+      console.log('[Firestore] Detaching real-time listener for pending orders');
+      unsubscribe();
+    };
+  }, [user]);
 
-  // Listen to approved orders real-time — sorted by approval sequence (approvedAt)
+  // Listen to products real-time (only when logged in)
   useEffect(() => {
-    const q = query(collection(db, 'approvedOrders'), orderBy('approvedAt', 'asc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = [];
-      snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
-      setApprovedOrders(list);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Listen to products real-time
-  useEffect(() => {
+    if (!user) {
+      setProducts([]);
+      return;
+    }
+    console.log('[Firestore] Attaching real-time listener for products');
     const q = query(collection(db, 'products'), orderBy('name', 'asc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      console.log(`[Firestore] Products update received: ${snapshot.size} products`);
       const list = [];
       snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
       setProducts(list);
     });
-    return () => unsubscribe();
-  }, []);
-
-  // Listen to product history real-time
-  useEffect(() => {
-    const q = query(collection(db, 'productHistory'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = [];
-      snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
-      setHistoryRecords(list);
-    });
-    return () => unsubscribe();
-  }, []);
+    return () => {
+      console.log('[Firestore] Detaching real-time listener for products');
+      unsubscribe();
+    };
+  }, [user]);
 
   function handleLogin(session) {
     setUser(session);
@@ -377,6 +382,83 @@ export default function App() {
     }
   }
 
+  async function handleBulkApprove(orderIds) {
+    if (!orderIds || orderIds.length === 0) return { success: false, message: 'No orders selected.' };
+
+    try {
+      const result = await runTransaction(db, async (transaction) => {
+        const orderRefs = orderIds.map(id => doc(db, 'orders', id));
+        const orderSnaps = await Promise.all(orderRefs.map(ref => transaction.get(ref)));
+
+        for (const snap of orderSnaps) {
+          if (!snap.exists()) {
+            throw new Error('One or more selected orders have already been approved or deleted.');
+          }
+        }
+
+        const ordersData = orderSnaps.map(snap => ({ id: snap.id, ...snap.data() }));
+        const uniqueProductNames = [...new Set(ordersData.map(o => o.productName.toLowerCase()))];
+
+        const productRefsMap = {};
+        for (const name of uniqueProductNames) {
+          const matchedProd = products.find(p => p.name.toLowerCase() === name);
+          if (!matchedProd) {
+            throw new Error(`Product "${name}" not found in inventory.`);
+          }
+          productRefsMap[name] = doc(db, 'products', matchedProd.id);
+        }
+
+        const uniqueProductNamesList = Object.keys(productRefsMap);
+        const productRefs = uniqueProductNamesList.map(name => productRefsMap[name]);
+        const productSnaps = await Promise.all(productRefs.map(ref => transaction.get(ref)));
+
+        const productQtyMap = {};
+        for (let i = 0; i < uniqueProductNamesList.length; i++) {
+          const name = uniqueProductNamesList[i];
+          const snap = productSnaps[i];
+          if (!snap.exists()) {
+            throw new Error(`Product "${name}" does not exist in database.`);
+          }
+          productQtyMap[name] = snap.data().quantity || 0;
+        }
+
+        for (const order of ordersData) {
+          const pName = order.productName.toLowerCase();
+          const currentQty = productQtyMap[pName];
+          productQtyMap[pName] = Number((currentQty - order.quantity).toFixed(4));
+        }
+
+        for (const name of uniqueProductNamesList) {
+          transaction.update(productRefsMap[name], {
+            quantity: productQtyMap[name]
+          });
+        }
+
+        for (const order of ordersData) {
+          const approvedRef = doc(collection(db, 'approvedOrders'));
+          transaction.set(approvedRef, {
+            date:        order.date        || '',
+            productName: order.productName || '',
+            quantity:    order.quantity    || 0,
+            bookType:    order.bookType    || 'Large Book',
+            status:      'approved',
+            approvedAt:  new Date().toISOString()
+          });
+
+          const orderRef = doc(db, 'orders', order.id);
+          transaction.delete(orderRef);
+        }
+
+        return { success: true };
+      });
+
+      return result;
+    } catch (err) {
+      console.error('Bulk approval transaction failed: ', err);
+      return { success: false, message: err.message || 'Bulk approval failed.' };
+    }
+  }
+
   async function handleDeleteOrder(id) {
     try {
       await deleteDoc(doc(db, 'orders', id));
@@ -476,14 +558,12 @@ export default function App() {
       ) : activeTab === 'approved' ? (
         <ApprovedOrders
           user={user}
-          approvedOrders={approvedOrders}
           onDeleteApproved={handleDeleteApproved}
           onDeleteAllApproved={handleDeleteAllApproved}
         />
       ) : activeTab === 'history' ? (
         <ProductHistory
           user={user}
-          historyRecords={historyRecords}
           onDeleteHistory={handleDeleteHistory}
           onDeleteAllHistory={handleDeleteAllHistory}
         />
@@ -492,6 +572,7 @@ export default function App() {
           records={records}
           products={products}
           onApproveRecord={handleApprove}
+          onApproveBulkRecords={handleBulkApprove}
           onDeleteRecord={handleDeleteOrder}
           onEditRecord={handleEditOrder}
           onDeleteAllOrdersByBookType={handleDeleteAllOrdersByBookType}
