@@ -253,6 +253,20 @@ export default function App() {
     }
   }
 
+  async function handleEditProductApproval(approvalId, updatedData) {
+    try {
+      console.log('[Firestore] Updating product approval request...');
+      await updateDoc(doc(db, 'productApprovals', approvalId), {
+        productName: updatedData.productName.trim(),
+        quantity: Number(updatedData.quantity)
+      });
+      return { success: true };
+    } catch (err) {
+      console.error('Error updating product approval request:', err);
+      return { success: false, message: err.message || 'Update failed.' };
+    }
+  }
+
   async function handleApproveProduct(approvalId) {
     try {
       const approvalRef = doc(db, 'productApprovals', approvalId);
@@ -768,6 +782,7 @@ export default function App() {
           onApprove={handleApproveProduct}
           onDelete={handleDeleteProductApproval}
           onApproveBulk={handleBulkApproveProducts}
+          onEditApproval={handleEditProductApproval}
         />
       ) : activeTab === 'history' ? (
         <ProductHistory
