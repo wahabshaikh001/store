@@ -16,83 +16,178 @@ export default function ApprovedOrders({ user, products = [], onDeleteApproved, 
   const isAdmin = user?.role === 'admin';
   const [bookTab, setBookTab] = useState('Large Book');
   const [currentPage, setCurrentPage] = useState(1);
-  const [allApprovedOrders, setAllApprovedOrders] = useState([]);
+  const [approvedOrders, setApprovedOrders] = useState([]);
+  const [largeBookCount, setLargeBookCount] = useState(0);
+  const [smallBookCount, setSmallBookCount] = useState(0);
+  const [totalEntries, setTotalEntries] = useState(0);
   const [isFetching, setIsFetching] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  const fetchAllApproved = useCallback(async () => {
+  const pageLastDocs = useRef([null]);
+  const prevBookTab = useRef(bookTab);
+  const prevSearchQuery = useRef(searchQuery);
+  const activeRequestId = useRef(0);
+
+  const totalPages = Math.max(1, Math.ceil(totalEntries / 10));
+  const activePage = Math.min(currentPage, totalPages);
+
+  const fetchCountsAndEntries = useCallback(async () => {
+    try {
+      console.log('[Firestore] [ApprovedOrders] Fetching total counts and pagination entries...');
+      const qLarge = query(collection(db, 'approvedOrders'), where('bookType', '==', 'Large Book'));
+      const qSmall = query(collection(db, 'approvedOrders'), where('bookType', '==', 'Small Book'));
+      
+      let qCurrent = query(collection(db, 'approvedOrders'), where('bookType', '==', bookTab));
+      if (searchQuery.trim()) {
+        qCurrent = query(qCurrent, where('productName', '==', searchQuery.trim()));
+      }
+      
+      const [snapLarge, snapSmall, snapCurrent] = await Promise.all([
+        getCountFromServer(qLarge),
+        getCountFromServer(qSmall),
+        getCountFromServer(qCurrent)
+      ]);
+      
+      const lCount = snapLarge.data().count;
+      const sCount = snapSmall.data().count;
+      const cCount = snapCurrent.data().count;
+      
+      setLargeBookCount(lCount);
+      setSmallBookCount(sCount);
+      setTotalEntries(cCount);
+      return { 'Large Book': lCount, 'Small Book': sCount, 'current': cCount };
+    } catch (e) {
+      console.error("[Firestore] [ApprovedOrders] Error fetching counts:", e);
+      if (e.message && e.message.toLowerCase().includes('index')) {
+        setErrorMsg('This view requires a Firestore composite index. Please check your developer tools console for the link to create the index.');
+      }
+      return { 'Large Book': 0, 'Small Book': 0, 'current': 0 };
+    }
+  }, [bookTab, searchQuery]);
+
+  // Fetch a scoped page of approved orders
+  const fetchPageData = useCallback(async (targetPage, targetBookTab) => {
+    const requestId = ++activeRequestId.current;
     setIsFetching(true);
     setErrorMsg('');
+    const pageSize = 10;
+
     try {
-      console.log('[Firestore] [ApprovedOrders] Fetching all approved orders...');
-      const q = query(
-        collection(db, 'approvedOrders'),
-        orderBy('approvedAt', 'asc')
-      );
+      let baseQuery = query(collection(db, 'approvedOrders'), where('bookType', '==', targetBookTab));
+      if (searchQuery.trim()) {
+        baseQuery = query(baseQuery, where('productName', '==', searchQuery.trim()));
+      }
+
+      let q;
+      if (targetPage === 1) {
+        q = query(
+          baseQuery,
+          orderBy('approvedAt', 'asc'),
+          limit(pageSize)
+        );
+      } else if (pageLastDocs.current[targetPage - 1] !== undefined && pageLastDocs.current[targetPage - 1] !== null) {
+        q = query(
+          baseQuery,
+          orderBy('approvedAt', 'asc'),
+          startAfter(pageLastDocs.current[targetPage - 1]),
+          limit(pageSize)
+        );
+      } else {
+        const cursorQ = query(
+          baseQuery,
+          orderBy('approvedAt', 'asc'),
+          limit((targetPage - 1) * pageSize)
+        );
+        console.log(`[Firestore] [ApprovedOrders] Fetching cursors up to page ${targetPage} via getDocs`);
+        const cursorSnap = await getDocs(cursorQ);
+        if (requestId !== activeRequestId.current) return;
+
+        console.log(`[Firestore] [ApprovedOrders] Fetched cursors. Count: ${cursorSnap.size}`);
+        const cursorDocs = cursorSnap.docs;
+        for (let p = 1; p < targetPage; p++) {
+          const idx = p * pageSize - 1;
+          if (idx < cursorDocs.length) {
+            pageLastDocs.current[p] = cursorDocs[idx];
+          }
+        }
+        if (cursorDocs.length > 0) {
+          q = query(
+            baseQuery,
+            orderBy('approvedAt', 'asc'),
+            startAfter(cursorDocs[cursorDocs.length - 1]),
+            limit(pageSize)
+          );
+        } else {
+          q = query(
+            baseQuery,
+            orderBy('approvedAt', 'asc'),
+            limit(pageSize)
+          );
+        }
+      }
+
+      console.log(`[Firestore] [ApprovedOrders] Fetching page ${targetPage} via getDocs`);
       const snapshot = await getDocs(q);
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      setAllApprovedOrders(list);
+      if (requestId !== activeRequestId.current) return;
+
+      console.log(`[Firestore] [ApprovedOrders] Page data received for page ${targetPage}: ${snapshot.size} docs`);
+      const docs = snapshot.docs;
+      const list = docs.map(d => ({ id: d.id, ...d.data() }));
+      if (docs.length > 0) {
+        pageLastDocs.current[targetPage] = docs[docs.length - 1];
+      }
+      setApprovedOrders(list);
     } catch (e) {
-      console.error("[Firestore] [ApprovedOrders] Error fetching all approved orders:", e);
+      if (requestId !== activeRequestId.current) return;
+      console.error(`[Firestore] [ApprovedOrders] Error fetching approved orders for page ${targetPage}:`, e);
       if (e.message && e.message.toLowerCase().includes('index')) {
         setErrorMsg('This view requires a Firestore composite index. Please check your developer tools console for the link to create the index.');
       } else {
         setErrorMsg('Failed to load records. Please check your network connection.');
       }
     } finally {
-      setIsFetching(false);
+      if (requestId === activeRequestId.current) {
+        setIsFetching(false);
+      }
     }
-  }, []);
+  }, [searchQuery]);
 
-  // Fetch all approved orders on mount
+  // Effect to load count when bookTab or searchQuery changes
   useEffect(() => {
-    fetchAllApproved();
-  }, [fetchAllApproved]);
+    pageLastDocs.current = [null];
+    setCurrentPage(1);
+    fetchCountsAndEntries();
+  }, [bookTab, searchQuery, fetchCountsAndEntries]);
 
-  const largeBookCount = allApprovedOrders.filter(r => (r.bookType || 'Large Book') === 'Large Book').length;
-  const smallBookCount = allApprovedOrders.filter(r => r.bookType === 'Small Book').length;
-
-  const totalEntries = bookTab === 'Large Book' ? largeBookCount : smallBookCount;
+  // Effect to load page data when bookTab, currentPage or searchQuery changes
+  useEffect(() => {
+    let targetPage = currentPage;
+    if (prevBookTab.current !== bookTab || prevSearchQuery.current !== searchQuery) {
+      prevBookTab.current = bookTab;
+      prevSearchQuery.current = searchQuery;
+      pageLastDocs.current = [null];
+      setCurrentPage(1);
+      targetPage = 1;
+    }
+    fetchPageData(targetPage, bookTab);
+  }, [bookTab, currentPage, searchQuery, fetchPageData]);
 
   const uniqueProductNames = Array.from(new Set([
     ...products.map(p => p.name),
-    ...allApprovedOrders.map(r => r.productName).filter(Boolean)
+    ...approvedOrders.map(r => r.productName).filter(Boolean)
   ]));
 
   const filteredSuggestions = searchQuery.trim()
     ? uniqueProductNames.filter(name => name.toLowerCase().includes(searchQuery.toLowerCase()))
     : [];
 
-  const filteredByBook = allApprovedOrders.filter(r => (r.bookType || 'Large Book') === bookTab);
-
-  const filteredApproved = filteredByBook.filter(r => {
-    return searchQuery.trim()
-      ? r.productName.toLowerCase().includes(searchQuery.toLowerCase())
-      : true;
-  });
-
-  const totalFilteredEntries = filteredApproved.length;
-  const totalPages = Math.max(1, Math.ceil(totalFilteredEntries / 10));
-  const activePage = Math.min(currentPage, totalPages);
-  const paginatedApproved = filteredApproved.slice((activePage - 1) * 10, activePage * 10);
-
-  // Keep currentPage inside valid range if list changes
-  useEffect(() => {
-    const pages = Math.max(1, Math.ceil(filteredApproved.length / 10));
-    if (currentPage > pages) {
-      setCurrentPage(pages);
-    }
-  }, [filteredApproved.length, currentPage]);
-
   const [confirmAll, setConfirmAll] = useState(false);
   const [loading, setLoading] = useState(false);
 
   function handleBookTabChange(tab) {
     setBookTab(tab);
-    setCurrentPage(1);
-    setSearchQuery('');
     setConfirmAll(false);
   }
 
@@ -103,7 +198,11 @@ export default function ApprovedOrders({ user, products = [], onDeleteApproved, 
     }
     setLoading(true);
     await onDeleteAllApproved();
-    setAllApprovedOrders([]);
+    setApprovedOrders([]);
+    setLargeBookCount(0);
+    setSmallBookCount(0);
+    setTotalEntries(0);
+    pageLastDocs.current = [null];
     setCurrentPage(1);
     setConfirmAll(false);
     setLoading(false);
@@ -113,7 +212,16 @@ export default function ApprovedOrders({ user, products = [], onDeleteApproved, 
     if (window.confirm('Delete this approved order?')) {
       setLoading(true);
       await onDeleteApproved(id);
-      setAllApprovedOrders(prev => prev.filter(r => r.id !== id));
+      pageLastDocs.current.splice(currentPage);
+      const newCounts = await fetchCountsAndEntries();
+      const newTotal = newCounts['current'];
+      const newTotalPages = Math.max(1, Math.ceil(newTotal / 10));
+      let nextPage = currentPage;
+      if (currentPage > newTotalPages) {
+        setCurrentPage(newTotalPages);
+        nextPage = newTotalPages;
+      }
+      fetchPageData(nextPage, bookTab);
       setLoading(false);
     }
   }
@@ -228,25 +336,21 @@ export default function ApprovedOrders({ user, products = [], onDeleteApproved, 
 
         {errorMsg && <div className="alert alert-danger">{errorMsg}</div>}
 
-        {isFetching && allApprovedOrders.length === 0 ? (
+        {isFetching && approvedOrders.length === 0 ? (
           <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
             Loading records…
           </div>
-        ) : filteredByBook.length === 0 ? (
+        ) : totalEntries === 0 ? (
           <div className="no-records">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <p>No {bookTab} approved orders yet.</p>
-          </div>
-        ) : filteredApproved.length === 0 ? (
-          <div className="no-records">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <p>No matching approved orders found for "{searchQuery}".</p>
+            <p>
+              {searchQuery.trim()
+                ? `No matching approved orders found for "${searchQuery}".`
+                : `No ${bookTab} approved orders yet.`}
+            </p>
           </div>
         ) : (
           <>
@@ -263,7 +367,7 @@ export default function ApprovedOrders({ user, products = [], onDeleteApproved, 
                   </tr>
                 </thead>
                 <tbody>
-                  {paginatedApproved.map((r, i) => (
+                  {approvedOrders.map((r, i) => (
                     <tr key={r.id}>
                       <td style={{ fontWeight: 600 }}>{(activePage - 1) * 10 + i + 1}</td>
                       <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{r.date || '—'}</td>
@@ -292,7 +396,7 @@ export default function ApprovedOrders({ user, products = [], onDeleteApproved, 
             </div>
             <Pagination
               currentPage={activePage}
-              totalEntries={totalFilteredEntries}
+              totalEntries={totalEntries}
               pageSize={10}
               onPageChange={setCurrentPage}
             />

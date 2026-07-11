@@ -3,6 +3,7 @@ import { db } from '../firebase';
 import {
   collection,
   query,
+  where,
   orderBy,
   limit,
   startAfter,
@@ -14,64 +15,151 @@ import Pagination from './Pagination';
 export default function ProductHistory({ user, products = [], onDeleteHistory, onDeleteAllHistory }) {
   const isAdmin = user?.role === 'admin';
   const [currentPage, setCurrentPage] = useState(1);
-  const [allHistoryRecords, setAllHistoryRecords] = useState([]);
+  const [historyRecords, setHistoryRecords] = useState([]);
+  const [totalEntries, setTotalEntries] = useState(0);
   const [isFetching, setIsFetching] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  const fetchAllHistory = useCallback(async () => {
+  const pageLastDocs = useRef([null]);
+  const prevSearchQuery = useRef(searchQuery);
+  const activeRequestId = useRef(0);
+
+  const totalPages = Math.max(1, Math.ceil(totalEntries / 10));
+  const activePage = Math.min(currentPage, totalPages);
+
+  const fetchCount = useCallback(async () => {
+    try {
+      console.log('[Firestore] [ProductHistory] Fetching history count...');
+      let q = collection(db, 'productHistory');
+      if (searchQuery.trim()) {
+        q = query(q, where('productName', '==', searchQuery.trim()));
+      }
+      const snap = await getCountFromServer(q);
+      const count = snap.data().count;
+      setTotalEntries(count);
+      return count;
+    } catch (e) {
+      console.error("[Firestore] [ProductHistory] Error fetching history count:", e);
+      if (e.message && e.message.toLowerCase().includes('index')) {
+        setErrorMsg('This view requires a Firestore composite index. Please check your developer tools console for the link to create the index.');
+      }
+      return 0;
+    }
+  }, [searchQuery]);
+
+  // Fetch a scoped page of product history
+  const fetchPageData = useCallback(async (targetPage) => {
+    const requestId = ++activeRequestId.current;
     setIsFetching(true);
     setErrorMsg('');
-    try {
-      console.log('[Firestore] [ProductHistory] Fetching all history logs...');
-      const q = query(
-        collection(db, 'productHistory'),
-        orderBy('createdAt', 'desc')
-      );
-      const snapshot = await getDocs(q);
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      setAllHistoryRecords(list);
-    } catch (e) {
-      console.error("[Firestore] [ProductHistory] Error fetching all history:", e);
-      setErrorMsg('Failed to load history logs. Please check your network connection.');
-    } finally {
-      setIsFetching(false);
-    }
-  }, []);
+    const pageSize = 10;
 
-  // Fetch all history on mount
+    try {
+      let baseQuery = collection(db, 'productHistory');
+      if (searchQuery.trim()) {
+        baseQuery = query(baseQuery, where('productName', '==', searchQuery.trim()));
+      }
+
+      let q;
+      if (targetPage === 1) {
+        q = query(
+          baseQuery,
+          orderBy('createdAt', 'desc'),
+          limit(pageSize)
+        );
+      } else if (pageLastDocs.current[targetPage - 1] !== undefined && pageLastDocs.current[targetPage - 1] !== null) {
+        q = query(
+          baseQuery,
+          orderBy('createdAt', 'desc'),
+          startAfter(pageLastDocs.current[targetPage - 1]),
+          limit(pageSize)
+        );
+      } else {
+        const cursorQ = query(
+          baseQuery,
+          orderBy('createdAt', 'desc'),
+          limit((targetPage - 1) * pageSize)
+        );
+        console.log(`[Firestore] [ProductHistory] Fetching cursors up to page ${targetPage} via getDocs`);
+        const cursorSnap = await getDocs(cursorQ);
+        if (requestId !== activeRequestId.current) return;
+
+        console.log(`[Firestore] [ProductHistory] Fetched cursors. Count: ${cursorSnap.size}`);
+        const cursorDocs = cursorSnap.docs;
+        for (let p = 1; p < targetPage; p++) {
+          const idx = p * pageSize - 1;
+          if (idx < cursorDocs.length) {
+            pageLastDocs.current[p] = cursorDocs[idx];
+          }
+        }
+        if (cursorDocs.length > 0) {
+          q = query(
+            baseQuery,
+            orderBy('createdAt', 'desc'),
+            startAfter(cursorDocs[cursorDocs.length - 1]),
+            limit(pageSize)
+          );
+        } else {
+          q = query(
+            baseQuery,
+            orderBy('createdAt', 'desc'),
+            limit(pageSize)
+          );
+        }
+      }
+
+      console.log(`[Firestore] [ProductHistory] Fetching page ${targetPage} via getDocs`);
+      const snapshot = await getDocs(q);
+      if (requestId !== activeRequestId.current) return;
+
+      console.log(`[Firestore] [ProductHistory] Page data received for page ${targetPage}: ${snapshot.size} docs`);
+      const docs = snapshot.docs;
+      const list = docs.map(d => ({ id: d.id, ...d.data() }));
+      if (docs.length > 0) {
+        pageLastDocs.current[targetPage] = docs[docs.length - 1];
+      }
+      setHistoryRecords(list);
+    } catch (e) {
+      if (requestId !== activeRequestId.current) return;
+      console.error(`[Firestore] [ProductHistory] Error fetching history logs for page ${targetPage}:`, e);
+      if (e.message && e.message.toLowerCase().includes('index')) {
+        setErrorMsg('This view requires a Firestore composite index. Please check your developer tools console for the link to create the index.');
+      } else {
+        setErrorMsg('Failed to load history logs. Please check your network connection.');
+      }
+    } finally {
+      if (requestId === activeRequestId.current) {
+        setIsFetching(false);
+      }
+    }
+  }, [searchQuery]);
+
+  // Fetch count once or when searchQuery changes
   useEffect(() => {
-    fetchAllHistory();
-  }, [fetchAllHistory]);
+    pageLastDocs.current = [null];
+    setCurrentPage(1);
+    fetchCount();
+  }, [searchQuery, fetchCount]);
+
+  // Fetch page data when currentPage or searchQuery changes
+  useEffect(() => {
+    const targetPage = prevSearchQuery.current !== searchQuery ? 1 : currentPage;
+    if (prevSearchQuery.current !== searchQuery) {
+      prevSearchQuery.current = searchQuery;
+    }
+    fetchPageData(targetPage);
+  }, [currentPage, searchQuery, fetchPageData]);
 
   const uniqueProductNames = Array.from(new Set([
     ...products.map(p => p.name),
-    ...allHistoryRecords.map(r => r.productName).filter(Boolean)
+    ...historyRecords.map(r => r.productName).filter(Boolean)
   ]));
 
   const filteredSuggestions = searchQuery.trim()
     ? uniqueProductNames.filter(name => name.toLowerCase().includes(searchQuery.toLowerCase()))
     : [];
-
-  const filteredHistory = allHistoryRecords.filter(r => {
-    return searchQuery.trim()
-      ? r.productName.toLowerCase().includes(searchQuery.toLowerCase())
-      : true;
-  });
-
-  const totalEntries = filteredHistory.length;
-  const totalPages = Math.max(1, Math.ceil(totalEntries / 10));
-  const activePage = Math.min(currentPage, totalPages);
-  const paginatedHistory = filteredHistory.slice((activePage - 1) * 10, activePage * 10);
-
-  // Keep currentPage inside valid range if list changes
-  useEffect(() => {
-    const pages = Math.max(1, Math.ceil(filteredHistory.length / 10));
-    if (currentPage > pages) {
-      setCurrentPage(pages);
-    }
-  }, [filteredHistory.length, currentPage]);
 
   const [confirmAll, setConfirmAll] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -83,7 +171,9 @@ export default function ProductHistory({ user, products = [], onDeleteHistory, o
     }
     setLoading(true);
     await onDeleteAllHistory();
-    setAllHistoryRecords([]);
+    setHistoryRecords([]);
+    setTotalEntries(0);
+    pageLastDocs.current = [null];
     setCurrentPage(1);
     setConfirmAll(false);
     setLoading(false);
@@ -93,7 +183,15 @@ export default function ProductHistory({ user, products = [], onDeleteHistory, o
     if (window.confirm('Delete this history record?')) {
       setLoading(true);
       await onDeleteHistory(id);
-      setAllHistoryRecords(prev => prev.filter(r => r.id !== id));
+      pageLastDocs.current.splice(currentPage);
+      const newTotal = await fetchCount();
+      const newTotalPages = Math.max(1, Math.ceil(newTotal / 10));
+      let nextPage = currentPage;
+      if (currentPage > newTotalPages) {
+        setCurrentPage(newTotalPages);
+        nextPage = newTotalPages;
+      }
+      fetchPageData(nextPage);
       setLoading(false);
     }
   }
@@ -108,7 +206,7 @@ export default function ProductHistory({ user, products = [], onDeleteHistory, o
         >
           <span>📋 Product History List</span>
 
-          {isAdmin && allHistoryRecords.length > 0 && (
+          {isAdmin && totalEntries > 0 && (
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               {confirmAll && (
                 <span style={{ fontSize: '0.8rem', color: 'var(--danger)', fontWeight: 600 }}>
@@ -190,25 +288,21 @@ export default function ProductHistory({ user, products = [], onDeleteHistory, o
 
         {errorMsg && <div className="alert alert-danger">{errorMsg}</div>}
 
-        {isFetching && allHistoryRecords.length === 0 ? (
+        {isFetching && historyRecords.length === 0 ? (
           <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
             Loading history…
           </div>
-        ) : allHistoryRecords.length === 0 ? (
+        ) : totalEntries === 0 ? (
           <div className="no-records">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
             </svg>
-            <p>No product history records found.</p>
-          </div>
-        ) : filteredHistory.length === 0 ? (
-          <div className="no-records">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-            </svg>
-            <p>No matching history records found for "{searchQuery}".</p>
+            <p>
+              {searchQuery.trim()
+                ? `No matching history records found for "${searchQuery}".`
+                : 'No product history records found.'}
+            </p>
           </div>
         ) : (
           <>
@@ -224,7 +318,7 @@ export default function ProductHistory({ user, products = [], onDeleteHistory, o
                   </tr>
                 </thead>
                 <tbody>
-                  {paginatedHistory.map((r, i) => (
+                  {historyRecords.map((r, i) => (
                     <tr key={r.id}>
                       <td style={{ fontWeight: 600 }}>{(activePage - 1) * 10 + i + 1}</td>
                       <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{r.date || '—'}</td>
