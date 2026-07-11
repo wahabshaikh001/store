@@ -12,161 +12,87 @@ import {
 } from 'firebase/firestore';
 import Pagination from './Pagination';
 
-export default function ApprovedOrders({ user, onDeleteApproved, onDeleteAllApproved }) {
+export default function ApprovedOrders({ user, products = [], onDeleteApproved, onDeleteAllApproved }) {
   const isAdmin = user?.role === 'admin';
   const [bookTab, setBookTab] = useState('Large Book');
   const [currentPage, setCurrentPage] = useState(1);
-  const [approvedOrders, setApprovedOrders] = useState([]);
-  const [largeBookCount, setLargeBookCount] = useState(0);
-  const [smallBookCount, setSmallBookCount] = useState(0);
+  const [allApprovedOrders, setAllApprovedOrders] = useState([]);
   const [isFetching, setIsFetching] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
-  const pageLastDocs = useRef([null]);
-  const prevBookTab = useRef(bookTab);
-  const activeRequestId = useRef(0);
-
-  const totalEntries = bookTab === 'Large Book' ? largeBookCount : smallBookCount;
-  const totalPages = Math.max(1, Math.ceil(totalEntries / 10));
-  const activePage = Math.min(currentPage, totalPages);
-
-  const fetchCounts = useCallback(async () => {
-    try {
-      console.log('[Firestore] [ApprovedOrders] Fetching total counts for Large Book and Small Book...');
-      const qLarge = query(collection(db, 'approvedOrders'), where('bookType', '==', 'Large Book'));
-      const qSmall = query(collection(db, 'approvedOrders'), where('bookType', '==', 'Small Book'));
-      const [snapLarge, snapSmall] = await Promise.all([
-        getCountFromServer(qLarge),
-        getCountFromServer(qSmall)
-      ]);
-      const lCount = snapLarge.data().count;
-      const sCount = snapSmall.data().count;
-      console.log(`[Firestore] [ApprovedOrders] Counts fetched. Large Book: ${lCount}, Small Book: ${sCount}`);
-      setLargeBookCount(lCount);
-      setSmallBookCount(sCount);
-      return { 'Large Book': lCount, 'Small Book': sCount };
-    } catch (e) {
-      console.error("[Firestore] [ApprovedOrders] Error fetching counts:", e);
-      return { 'Large Book': 0, 'Small Book': 0 };
-    }
-  }, []);
-
-  // Fetch a scoped page of approved orders
-  const fetchPageData = useCallback(async (targetPage, targetBookTab) => {
-    const requestId = ++activeRequestId.current;
+  const fetchAllApproved = useCallback(async () => {
     setIsFetching(true);
     setErrorMsg('');
-    const pageSize = 10;
-
     try {
-      let q;
-      if (targetPage === 1) {
-        q = query(
-          collection(db, 'approvedOrders'),
-          where('bookType', '==', targetBookTab),
-          orderBy('approvedAt', 'asc'),
-          limit(pageSize)
-        );
-      } else if (pageLastDocs.current[targetPage - 1] !== undefined && pageLastDocs.current[targetPage - 1] !== null) {
-        q = query(
-          collection(db, 'approvedOrders'),
-          where('bookType', '==', targetBookTab),
-          orderBy('approvedAt', 'asc'),
-          startAfter(pageLastDocs.current[targetPage - 1]),
-          limit(pageSize)
-        );
-      } else {
-        // Need to fetch cursor docs first via one-time query
-        const cursorQ = query(
-          collection(db, 'approvedOrders'),
-          where('bookType', '==', targetBookTab),
-          orderBy('approvedAt', 'asc'),
-          limit((targetPage - 1) * pageSize)
-        );
-        console.log(`[Firestore] [ApprovedOrders] Fetching cursors up to page ${targetPage} via getDocs`);
-        const cursorSnap = await getDocs(cursorQ);
-        if (requestId !== activeRequestId.current) return;
-
-        console.log(`[Firestore] [ApprovedOrders] Fetched cursors. Count: ${cursorSnap.size}`);
-        const cursorDocs = cursorSnap.docs;
-        // Cache intermediate page cursors
-        for (let p = 1; p < targetPage; p++) {
-          const idx = p * pageSize - 1;
-          if (idx < cursorDocs.length) {
-            pageLastDocs.current[p] = cursorDocs[idx];
-          }
-        }
-        if (cursorDocs.length > 0) {
-          q = query(
-            collection(db, 'approvedOrders'),
-            where('bookType', '==', targetBookTab),
-            orderBy('approvedAt', 'asc'),
-            startAfter(cursorDocs[cursorDocs.length - 1]),
-            limit(pageSize)
-          );
-        } else {
-          // No cursor docs means page is beyond data range
-          q = query(
-            collection(db, 'approvedOrders'),
-            where('bookType', '==', targetBookTab),
-            orderBy('approvedAt', 'asc'),
-            limit(pageSize)
-          );
-        }
-      }
-
-      console.log(`[Firestore] [ApprovedOrders] Fetching page ${targetPage} via getDocs`);
+      console.log('[Firestore] [ApprovedOrders] Fetching all approved orders...');
+      const q = query(
+        collection(db, 'approvedOrders'),
+        orderBy('approvedAt', 'asc')
+      );
       const snapshot = await getDocs(q);
-      if (requestId !== activeRequestId.current) return;
-
-      console.log(`[Firestore] [ApprovedOrders] Page data received for page ${targetPage}: ${snapshot.size} docs`);
-      const docs = snapshot.docs;
-      const list = docs.map(d => ({ id: d.id, ...d.data() }));
-      if (docs.length > 0) {
-        pageLastDocs.current[targetPage] = docs[docs.length - 1];
-      }
-      setApprovedOrders(list);
+      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      setAllApprovedOrders(list);
     } catch (e) {
-      if (requestId !== activeRequestId.current) return;
-      console.error(`[Firestore] [ApprovedOrders] Error fetching approved orders for page ${targetPage}:`, e);
+      console.error("[Firestore] [ApprovedOrders] Error fetching all approved orders:", e);
       if (e.message && e.message.toLowerCase().includes('index')) {
-        setErrorMsg('This view requires a Firestore composite index. Please check your developer tools console for the link to create the index, or use the link provided in the implementation plan.');
+        setErrorMsg('This view requires a Firestore composite index. Please check your developer tools console for the link to create the index.');
       } else {
         setErrorMsg('Failed to load records. Please check your network connection.');
       }
     } finally {
-      if (requestId === activeRequestId.current) {
-        setIsFetching(false);
-      }
+      setIsFetching(false);
     }
   }, []);
 
-  // Effect to load count when bookTab changes or component mounts
+  // Fetch all approved orders on mount
   useEffect(() => {
-    Promise.resolve().then(() => {
-      fetchCounts();
-    });
-  }, [bookTab, fetchCounts]);
+    fetchAllApproved();
+  }, [fetchAllApproved]);
 
-  // Effect to load page data when bookTab or currentPage changes
+  const largeBookCount = allApprovedOrders.filter(r => (r.bookType || 'Large Book') === 'Large Book').length;
+  const smallBookCount = allApprovedOrders.filter(r => r.bookType === 'Small Book').length;
+
+  const totalEntries = bookTab === 'Large Book' ? largeBookCount : smallBookCount;
+
+  const uniqueProductNames = Array.from(new Set([
+    ...products.map(p => p.name),
+    ...allApprovedOrders.map(r => r.productName).filter(Boolean)
+  ]));
+
+  const filteredSuggestions = searchQuery.trim()
+    ? uniqueProductNames.filter(name => name.toLowerCase().includes(searchQuery.toLowerCase()))
+    : [];
+
+  const filteredByBook = allApprovedOrders.filter(r => (r.bookType || 'Large Book') === bookTab);
+
+  const filteredApproved = filteredByBook.filter(r => {
+    return searchQuery.trim()
+      ? r.productName.toLowerCase().includes(searchQuery.toLowerCase())
+      : true;
+  });
+
+  const totalFilteredEntries = filteredApproved.length;
+  const totalPages = Math.max(1, Math.ceil(totalFilteredEntries / 10));
+  const activePage = Math.min(currentPage, totalPages);
+  const paginatedApproved = filteredApproved.slice((activePage - 1) * 10, activePage * 10);
+
+  // Keep currentPage inside valid range if list changes
   useEffect(() => {
-    let targetPage = currentPage;
-    if (prevBookTab.current !== bookTab) {
-      prevBookTab.current = bookTab;
-      pageLastDocs.current = [null];
-      setCurrentPage(1);
-      targetPage = 1;
+    const pages = Math.max(1, Math.ceil(filteredApproved.length / 10));
+    if (currentPage > pages) {
+      setCurrentPage(pages);
     }
-    Promise.resolve().then(() => {
-      fetchPageData(targetPage, bookTab);
-    });
-  }, [bookTab, currentPage, fetchPageData]);
+  }, [filteredApproved.length, currentPage]);
 
   const [confirmAll, setConfirmAll] = useState(false);
   const [loading, setLoading] = useState(false);
 
   function handleBookTabChange(tab) {
     setBookTab(tab);
+    setCurrentPage(1);
+    setSearchQuery('');
     setConfirmAll(false);
   }
 
@@ -177,10 +103,7 @@ export default function ApprovedOrders({ user, onDeleteApproved, onDeleteAllAppr
     }
     setLoading(true);
     await onDeleteAllApproved();
-    setApprovedOrders([]);
-    setLargeBookCount(0);
-    setSmallBookCount(0);
-    pageLastDocs.current = [null];
+    setAllApprovedOrders([]);
     setCurrentPage(1);
     setConfirmAll(false);
     setLoading(false);
@@ -190,17 +113,7 @@ export default function ApprovedOrders({ user, onDeleteApproved, onDeleteAllAppr
     if (window.confirm('Delete this approved order?')) {
       setLoading(true);
       await onDeleteApproved(id);
-      // Refresh counts and re-fetch
-      pageLastDocs.current.splice(currentPage);
-      const newCounts = await fetchCounts();
-      const newTotal = bookTab === 'Large Book' ? newCounts['Large Book'] : newCounts['Small Book'];
-      const newTotalPages = Math.max(1, Math.ceil(newTotal / 10));
-      let nextPage = currentPage;
-      if (currentPage > newTotalPages) {
-        setCurrentPage(newTotalPages);
-        nextPage = newTotalPages;
-      }
-      fetchPageData(nextPage, bookTab);
+      setAllApprovedOrders(prev => prev.filter(r => r.id !== id));
       setLoading(false);
     }
   }
@@ -259,19 +172,81 @@ export default function ApprovedOrders({ user, onDeleteApproved, onDeleteAllAppr
           </button>
         </div>
 
+        {/* Search Bar */}
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap', position: 'relative' }}>
+          <div style={{ flex: 1, minWidth: '200px', position: 'relative' }}>
+            <input
+              type="text"
+              className="form-control"
+              style={{ width: '100%' }}
+              placeholder="Search products..."
+              value={searchQuery}
+              onChange={e => {
+                setSearchQuery(e.target.value);
+                setShowSuggestions(true);
+                setCurrentPage(1);
+              }}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+              autoComplete="off"
+            />
+            {showSuggestions && searchQuery.trim().length > 0 && (
+              <div className="suggestions-dropdown" style={{ top: '100%', left: 0, right: 0 }}>
+                {filteredSuggestions.length > 0 ? (
+                  filteredSuggestions.map((name, index) => (
+                    <div
+                      key={index}
+                      className="suggestion-item"
+                      onMouseDown={e => {
+                        e.preventDefault();
+                        setSearchQuery(name);
+                        setShowSuggestions(false);
+                        setCurrentPage(1);
+                      }}
+                    >
+                      <span style={{ fontWeight: 600 }}>{name}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="suggestion-no-match">No matching products found</div>
+                )}
+              </div>
+            )}
+          </div>
+          {searchQuery && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                setSearchQuery('');
+                setCurrentPage(1);
+              }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
         {errorMsg && <div className="alert alert-danger">{errorMsg}</div>}
 
-        {isFetching && approvedOrders.length === 0 ? (
+        {isFetching && allApprovedOrders.length === 0 ? (
           <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
             Loading records…
           </div>
-        ) : totalEntries === 0 ? (
+        ) : filteredByBook.length === 0 ? (
           <div className="no-records">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <p>No {bookTab} approved orders yet.</p>
+          </div>
+        ) : filteredApproved.length === 0 ? (
+          <div className="no-records">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p>No matching approved orders found for "{searchQuery}".</p>
           </div>
         ) : (
           <>
@@ -288,7 +263,7 @@ export default function ApprovedOrders({ user, onDeleteApproved, onDeleteAllAppr
                   </tr>
                 </thead>
                 <tbody>
-                  {approvedOrders.map((r, i) => (
+                  {paginatedApproved.map((r, i) => (
                     <tr key={r.id}>
                       <td style={{ fontWeight: 600 }}>{(activePage - 1) * 10 + i + 1}</td>
                       <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{r.date || '—'}</td>
@@ -317,7 +292,7 @@ export default function ApprovedOrders({ user, onDeleteApproved, onDeleteAllAppr
             </div>
             <Pagination
               currentPage={activePage}
-              totalEntries={totalEntries}
+              totalEntries={totalFilteredEntries}
               pageSize={10}
               onPageChange={setCurrentPage}
             />

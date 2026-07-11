@@ -17,12 +17,33 @@ export default function AdminDashboard({
   const [confirmBulk, setConfirmBulk] = useState(false);
   const [approvingBulk, setApprovingBulk] = useState(false);
 
-  // Filter records by book type
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Suggestions come from products and active records
+  const uniqueProductNames = Array.from(new Set([
+    ...products.map(p => p.name),
+    ...records.map(r => r.productName).filter(Boolean)
+  ]));
+
+  const filteredSuggestions = searchQuery.trim()
+    ? uniqueProductNames.filter(name => name.toLowerCase().includes(searchQuery.toLowerCase()))
+    : [];
+
   const filteredByBook = records.filter(r => (r.bookType || 'Large Book') === bookTab);
-  
-  const totalPages = Math.max(1, Math.ceil(filteredByBook.length / 10));
+
+  // Filter records by book type and search query client-side
+  const filteredRecords = records.filter(r => {
+    const matchesBook = (r.bookType || 'Large Book') === bookTab;
+    const matchesSearch = searchQuery.trim()
+      ? r.productName.toLowerCase().includes(searchQuery.toLowerCase())
+      : true;
+    return matchesBook && matchesSearch;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / 10));
   const activePage = Math.min(currentPage, totalPages);
-  const paginatedRecords = filteredByBook.slice((activePage - 1) * 10, activePage * 10);
+  const paginatedRecords = filteredRecords.slice((activePage - 1) * 10, activePage * 10);
 
   const [editingOrderId, setEditingOrderId] = useState(null);
   const [editProductName, setEditProductName] = useState('');
@@ -42,6 +63,7 @@ export default function AdminDashboard({
   function handleBookTabChange(tab) {
     setBookTab(tab);
     setCurrentPage(1);
+    setSearchQuery('');
     setEditingOrderId(null);
     setError('');
     setSuccess('');
@@ -195,19 +217,8 @@ export default function AdminDashboard({
   }
 
   async function handleMigrationClick() {
-    if (!window.confirm('Run database migration? This will scan and update legacy orders and approvedOrders to ensure they have correct bookType and approvedAt attributes.')) {
-      return;
-    }
-    setMigrationLoading(true);
-    setError('');
-    setSuccess('');
-    const res = await onRunMigration();
-    if (res && res.success) {
-      setSuccess(res.message);
-    } else {
-      setError(res ? res.message : 'Migration failed.');
-    }
-    setMigrationLoading(false);
+    // Migration is temporarily disabled.
+    return;
   }
 
   return (
@@ -223,12 +234,13 @@ export default function AdminDashboard({
             <button
               className="btn btn-secondary btn-sm"
               onClick={handleMigrationClick}
-              disabled={migrationLoading || deleteAllLoading || approvingBulk || approvingOrderId !== null}
+              disabled={true}
+              style={{ opacity: 0.5, cursor: 'not-allowed' }}
             >
-              {migrationLoading ? '⏳ Migrating…' : '⚡ Run DB Migration'}
+              ⚡ Run DB Migration
             </button>
 
-            {filteredByBook.length > 0 && (
+            {filteredRecords.length > 0 && (
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 {selectedOrderIds.length > 0 && (
                   <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
@@ -310,6 +322,60 @@ export default function AdminDashboard({
           </button>
         </div>
 
+        {/* Search Bar */}
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap', position: 'relative' }}>
+          <div style={{ flex: 1, minWidth: '200px', position: 'relative' }}>
+            <input
+              type="text"
+              className="form-control"
+              style={{ width: '100%' }}
+              placeholder="Search products..."
+              value={searchQuery}
+              onChange={e => {
+                setSearchQuery(e.target.value);
+                setShowSuggestions(true);
+                setCurrentPage(1);
+              }}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+              autoComplete="off"
+            />
+            {showSuggestions && searchQuery.trim().length > 0 && (
+              <div className="suggestions-dropdown" style={{ top: '100%', left: 0, right: 0 }}>
+                {filteredSuggestions.length > 0 ? (
+                  filteredSuggestions.map((name, index) => (
+                    <div
+                      key={index}
+                      className="suggestion-item"
+                      onMouseDown={e => {
+                        e.preventDefault();
+                        setSearchQuery(name);
+                        setShowSuggestions(false);
+                        setCurrentPage(1);
+                      }}
+                    >
+                      <span style={{ fontWeight: 600 }}>{name}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="suggestion-no-match">No matching products found</div>
+                )}
+              </div>
+            )}
+          </div>
+          {searchQuery && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                setSearchQuery('');
+                setCurrentPage(1);
+              }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
         {error && <div className="alert alert-danger">{error}</div>}
         {success && <div className="alert alert-success">{success}</div>}
 
@@ -320,6 +386,14 @@ export default function AdminDashboard({
                 d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <p>No {bookTab} orders pending. All clear!</p>
+          </div>
+        ) : filteredRecords.length === 0 ? (
+          <div className="no-records">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p>No matching orders found for "{searchQuery}".</p>
           </div>
         ) : (
           <>
@@ -468,7 +542,7 @@ export default function AdminDashboard({
             </div>
             <Pagination
               currentPage={activePage}
-              totalEntries={filteredByBook.length}
+              totalEntries={filteredRecords.length}
               pageSize={10}
               onPageChange={handlePageChange}
             />

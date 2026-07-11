@@ -772,6 +772,7 @@ export default function App() {
       ) : activeTab === 'approved' ? (
         <ApprovedOrders
           user={user}
+          products={products}
           onDeleteApproved={handleDeleteApproved}
           onDeleteAllApproved={handleDeleteAllApproved}
         />
@@ -787,6 +788,7 @@ export default function App() {
       ) : activeTab === 'history' ? (
         <ProductHistory
           user={user}
+          products={products}
           onDeleteHistory={handleDeleteHistory}
           onDeleteAllHistory={handleDeleteAllHistory}
         />
