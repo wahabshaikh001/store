@@ -1,0 +1,51 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "productHistory",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "productName",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "approvedOrders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "bookType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "approvedAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "approvedOrders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "bookType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "productName",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "approvedAt",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

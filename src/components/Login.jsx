@@ -51,16 +51,19 @@ export default function Login({ onLogin }) {
 
         {error && <div className="alert alert-danger">{error}</div>}
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} autoComplete="off">
           <div className="form-group">
             <label htmlFor="username">Username</label>
             <input
               id="username"
+              name="loginUsername"
               type="text"
               className="form-control"
               placeholder="admin or sales"
               value={username}
               onChange={e => setUsername(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
               autoFocus
             />
           </div>
@@ -68,11 +71,13 @@ export default function Login({ onLogin }) {
             <label htmlFor="password">Password</label>
             <input
               id="password"
+              name="loginPassword"
               type="password"
               className="form-control"
               placeholder="••••••••"
               value={password}
               onChange={e => setPassword(e.target.value)}
+              autoComplete="new-password"
             />
           </div>
           <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem', padding: '0.65rem' }}>
