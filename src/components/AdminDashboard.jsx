@@ -9,7 +9,7 @@ export default function AdminDashboard({
   onDeleteRecord,
   onEditRecord,
   onDeleteAllOrdersByBookType,
-  onRunMigration
+  onRunMigration // eslint-disable-line no-unused-vars
 }) {
   const [bookTab, setBookTab] = useState('Large Book');
   const [currentPage, setCurrentPage] = useState(1);
@@ -18,25 +18,25 @@ export default function AdminDashboard({
   const [approvingBulk, setApprovingBulk] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  // Suggestions come from products and active records
-  const uniqueProductNames = Array.from(new Set([
-    ...products.map(p => p.name),
-    ...records.map(r => r.productName).filter(Boolean)
-  ]));
+  // Suggestions come from products only
+  const uniqueProductNames = Array.from(new Set(products.map(p => p.name)));
 
   const filteredSuggestions = searchQuery.trim()
-    ? uniqueProductNames.filter(name => name.toLowerCase().includes(searchQuery.toLowerCase()))
+    ? uniqueProductNames
+        .filter(name => name.toLowerCase().includes(searchQuery.toLowerCase()))
+        .slice(0, 10)
     : [];
 
   const filteredByBook = records.filter(r => (r.bookType || 'Large Book') === bookTab);
 
-  // Filter records by book type and search query client-side
+  // Filter records by book type and search query client-side using appliedSearchQuery
   const filteredRecords = records.filter(r => {
     const matchesBook = (r.bookType || 'Large Book') === bookTab;
-    const matchesSearch = searchQuery.trim()
-      ? r.productName.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesSearch = appliedSearchQuery.trim()
+      ? r.productName.toLowerCase().includes(appliedSearchQuery.toLowerCase())
       : true;
     return matchesBook && matchesSearch;
   });
@@ -54,6 +54,7 @@ export default function AdminDashboard({
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [deleteAllLoading, setDeleteAllLoading] = useState(false);
   const [approvingOrderId, setApprovingOrderId] = useState(null);
+  // eslint-disable-next-line no-unused-vars
   const [migrationLoading, setMigrationLoading] = useState(false);
 
   // Checkbox selection states
@@ -64,12 +65,28 @@ export default function AdminDashboard({
     setBookTab(tab);
     setCurrentPage(1);
     setSearchQuery('');
+    setAppliedSearchQuery('');
     setEditingOrderId(null);
     setError('');
     setSuccess('');
     setConfirmDeleteAll(false);
     setSelectedOrderIds([]);
     setConfirmBulk(false);
+  }
+
+  function executeSearch(queryText) {
+    const trimmed = (queryText || '').trim();
+    if (appliedSearchQuery !== trimmed) {
+      setAppliedSearchQuery(trimmed);
+      setSearchQuery(trimmed);
+      setCurrentPage(1);
+    }
+  }
+
+  function clearSearch() {
+    setSearchQuery('');
+    setAppliedSearchQuery('');
+    setCurrentPage(1);
   }
 
   function handlePageChange(page) {
@@ -334,7 +351,13 @@ export default function AdminDashboard({
               onChange={e => {
                 setSearchQuery(e.target.value);
                 setShowSuggestions(true);
-                setCurrentPage(1);
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  executeSearch(searchQuery);
+                  setShowSuggestions(false);
+                }
               }}
               onFocus={() => setShowSuggestions(true)}
               onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
@@ -349,9 +372,8 @@ export default function AdminDashboard({
                       className="suggestion-item"
                       onMouseDown={e => {
                         e.preventDefault();
-                        setSearchQuery(name);
+                        executeSearch(name);
                         setShowSuggestions(false);
-                        setCurrentPage(1);
                       }}
                     >
                       <span style={{ fontWeight: 600 }}>{name}</span>
@@ -363,13 +385,20 @@ export default function AdminDashboard({
               </div>
             )}
           </div>
-          {searchQuery && (
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => {
+              executeSearch(searchQuery);
+              setShowSuggestions(false);
+            }}
+            disabled={!searchQuery.trim()}
+          >
+            🔍 Search
+          </button>
+          {(searchQuery || appliedSearchQuery) && (
             <button
               className="btn btn-secondary btn-sm"
-              onClick={() => {
-                setSearchQuery('');
-                setCurrentPage(1);
-              }}
+              onClick={clearSearch}
             >
               Clear
             </button>
@@ -393,7 +422,7 @@ export default function AdminDashboard({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <p>No matching orders found for "{searchQuery}".</p>
+            <p>No matching orders found for "{appliedSearchQuery}".</p>
           </div>
         ) : (
           <>

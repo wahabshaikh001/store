@@ -11,21 +11,28 @@ export default function Login({ onLogin }) {
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
-    if (!username.trim() || !password) { setError('Please fill in all fields.'); return; }
+    const inputUser = username.trim().toLowerCase();
+    if (!inputUser || !password) {
+      setError('Please fill in all fields.');
+      return;
+    }
 
-    const userDocId = username.trim().toLowerCase();
-    if (userDocId !== 'admin' && userDocId !== 'sales') {
+    if (inputUser !== 'admin' && inputUser !== 'sales') {
       setError('Incorrect username or password.');
       return;
     }
 
     try {
-      const userRef = doc(db, 'users', userDocId);
+      const userRef = doc(db, 'users', inputUser);
       const userSnap = await getDoc(userRef);
       if (userSnap.exists()) {
         const userData = userSnap.data();
+        if (!userData.password) {
+          setError('Account is not configured correctly. Please contact your administrator.');
+          return;
+        }
         if (userData.password === password) {
-          const session = { username: userData.username, role: userDocId };
+          const session = { username: userData.username, role: inputUser };
           setSession(session);
           onLogin(session);
         } else {

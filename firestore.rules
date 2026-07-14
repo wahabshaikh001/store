@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUsername() {
+      return request.auth.token.email.replace('@store\\.local$', '');
+    }
+
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(getUsername())).data.role;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && getUserRole() == 'admin';
+    }
+
+    // 1. Users collection rules
+    match /users/{userId} {
+      // Allow reading single user document if authenticated or during migration (has password field)
+      allow get: if isAuthenticated() || (request.auth == null && resource.data.password != null);
+      allow list: if false;
+
+      // Allow users to update their own password field during migration.
+      // Once migrated, only admin users can update user profiles.
+      allow update: if (request.auth == null && resource.data.password != null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['password'])) || isAdmin();
+      
+      // Deny creating or deleting users from client SDK.
+      allow create, delete: if false;
+    }
+
+    // 2. Products collection rules
+    match /products/{productId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 3. Product Approvals rules
+    match /productApprovals/{approvalId} {
+      allow read: if isAuthenticated();
+      // Allow creation for authenticated users, updates/deletions only for admins
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    // 4. Orders collection rules
+    match /orders/{orderId} {
+      allow read: if isAuthenticated();
+      // Allow creation for authenticated users, updates/deletions only for admins
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    // 5. Approved Orders collection rules
+    match /approvedOrders/{approvedOrderId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 6. Product History collection rules
+    match /productHistory/{historyId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+  }
+}

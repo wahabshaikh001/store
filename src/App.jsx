@@ -14,7 +14,6 @@ import {
   collection,
   doc,
   getDoc,
-  setDoc,
   updateDoc,
   deleteDoc,
   query,
@@ -34,33 +33,6 @@ export default function App() {
   const [approvals, setApprovals]     = useState([]);
   const [activeTab, setActiveTab]     = useState('products');
   const [pwdOpen, setPwdOpen]         = useState(false);
-
-  // Seed default users if they do not exist
-  useEffect(() => {
-    if (localStorage.getItem('seed_users_done') === 'true') {
-      return;
-    }
-    async function seedDefaultUsers() {
-      try {
-        console.log('[Firestore] Checking if default users exist...');
-        const adminRef = doc(db, 'users', 'admin');
-        const salesRef = doc(db, 'users', 'sales');
-        const adminSnap = await getDoc(adminRef);
-        if (!adminSnap.exists()) {
-          await setDoc(adminRef, { username: 'admin', password: '1234', role: 'admin' });
-        }
-        const salesSnap = await getDoc(salesRef);
-        if (!salesSnap.exists()) {
-          await setDoc(salesRef, { username: 'sales', password: '1234', role: 'sales' });
-        }
-        localStorage.setItem('seed_users_done', 'true');
-        console.log('[Firestore] Default users check complete.');
-      } catch (error) {
-        console.error('Error seeding users: ', error);
-      }
-    }
-    seedDefaultUsers();
-  }, []);
 
   // ── MANUAL DATA MIGRATION: Patch existing orders/approvedOrders with bookType ──
   async function handleRunMigration() {
@@ -729,12 +701,16 @@ export default function App() {
   async function handleChangePassword(oldPwd, newPwd) {
     if (!user) return { success: false, message: 'No session.' };
     try {
-      const userRef  = doc(db, 'users', user.role);
+      const userRef  = doc(db, 'users', user.username || user.role);
       const userSnap = await getDoc(userRef);
       if (!userSnap.exists()) return { success: false, message: 'User profile not found in database.' };
       const data = userSnap.data();
       if (data.password !== oldPwd) return { success: false, message: 'Current password is incorrect.' };
       await updateDoc(userRef, { password: newPwd });
+      // Update session so it stays in sync
+      const updatedSession = { ...user, password: newPwd };
+      setSession(updatedSession);
+      setUser(updatedSession);
       return { success: true, message: 'Password updated successfully!' };
     } catch (err) {
       console.error('Error updating password: ', err);
