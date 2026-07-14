@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo, memo } from 'react';
 import Pagination from './Pagination';
 
-export default function ProductsSection({ user, products, onAddProduct, onEditProduct, onDeleteProduct }) {
+export default memo(function ProductsSection({ user, products, onAddProduct, onEditProduct, onDeleteProduct }) {
   const isAdmin = user?.role === 'admin';
   
   // Form states
@@ -11,10 +11,11 @@ export default function ProductsSection({ user, products, onAddProduct, onEditPr
   const [success, setSuccess] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  // Auto-suggestions logic
-  const filteredSuggestions = name.trim()
-    ? products.filter(p => p.name.toLowerCase().includes(name.toLowerCase()))
-    : [];
+  // Auto-suggestions logic (memoized to avoid recalculation on unrelated state changes)
+  const filteredSuggestions = useMemo(() => {
+    if (!name.trim()) return [];
+    return products.filter(p => p.name.toLowerCase().includes(name.toLowerCase()));
+  }, [name, products]);
 
   // Table filter states
   const [search, setSearch] = useState('');
@@ -100,16 +101,18 @@ export default function ProductsSection({ user, products, onAddProduct, onEditPr
     setEditingId(null);
   }
 
-  // Filter products
-  const filteredProducts = products.filter(p => {
+  // Filter products (memoized)
+  const filteredProducts = useMemo(() => products.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
     const matchesLowStock = filterLowStock ? p.quantity <= 10 : true;
     return matchesSearch && matchesLowStock;
-  });
+  }), [products, search, filterLowStock]);
 
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / 10));
   const activePage = Math.min(currentPage, totalPages);
-  const paginatedProducts = filteredProducts.slice((activePage - 1) * 10, activePage * 10);
+  const paginatedProducts = useMemo(() =>
+    filteredProducts.slice((activePage - 1) * 10, activePage * 10)
+  , [filteredProducts, activePage]);
 
   // Export to Excel / CSV
   function handleExportExcel() {
@@ -389,4 +392,4 @@ export default function ProductsSection({ user, products, onAddProduct, onEditPr
       </div>
     </div>
   );
-}
+});

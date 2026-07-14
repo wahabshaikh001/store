@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { db } from '../firebase';
 import {
   collection,
@@ -9,7 +9,7 @@ import {
 import Pagination from './Pagination';
 import { useFirestoreSearch } from '../hooks/useFirestoreSearch';
 
-export default function ApprovedOrders({ user, products = [], onDeleteApproved, onDeleteAllApproved }) {
+export default memo(function ApprovedOrders({ user, products = [], onDeleteApproved, onDeleteAllApproved }) {
   const isAdmin = user?.role === 'admin';
   const [bookTab, setBookTab] = useState('Large Book');
 
@@ -54,20 +54,20 @@ export default function ApprovedOrders({ user, products = [], onDeleteApproved, 
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchBookCounts();
   }, [fetchBookCounts]);
 
   const totalPages = Math.max(1, Math.ceil(totalEntries / 10));
   const activePage = Math.min(currentPage, totalPages);
 
-  const uniqueProductNames = Array.from(new Set(products.map(p => p.name)));
+  const uniqueProductNames = useMemo(() => Array.from(new Set(products.map(p => p.name))), [products]);
 
-  const filteredSuggestions = searchQuery.trim()
-    ? uniqueProductNames
-        .filter(name => name.toLowerCase().includes(searchQuery.toLowerCase()))
-        .slice(0, 10)
-    : [];
+  const filteredSuggestions = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    return uniqueProductNames
+      .filter(name => name.toLowerCase().includes(searchQuery.toLowerCase()))
+      .slice(0, 10);
+  }, [searchQuery, uniqueProductNames]);
 
   const [confirmAll, setConfirmAll] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -293,4 +293,4 @@ export default function ApprovedOrders({ user, products = [], onDeleteApproved, 
       </div>
     </div>
   );
-}
+});

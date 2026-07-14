@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo, memo } from 'react';
 import Pagination from './Pagination';
 
 /* ── Reusable order‑entry form for a specific book type ── */
-function BookOrderForm({ bookType, bookEmoji, products, onAddRecord, idPrefix }) {
+const BookOrderForm = memo(function BookOrderForm({ bookType, bookEmoji, products, onAddRecord, idPrefix }) {
   const todayStr = () => {
     const t = new Date();
     return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
@@ -15,14 +15,16 @@ function BookOrderForm({ bookType, bookEmoji, products, onAddRecord, idPrefix })
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  const filteredSuggestions = productName.trim()
-    ? products.filter(p => p.name.toLowerCase().includes(productName.toLowerCase()))
-    : [];
+  const filteredSuggestions = useMemo(() => {
+    if (!productName.trim()) return [];
+    return products.filter(p => p.name.toLowerCase().includes(productName.toLowerCase()));
+  }, [productName, products]);
 
   const trimmedName = productName.trim();
-  const matchedProduct = trimmedName
-    ? products.find(p => p.name.toLowerCase() === trimmedName.toLowerCase())
-    : null;
+  const matchedProduct = useMemo(() => {
+    if (!trimmedName) return null;
+    return products.find(p => p.name.toLowerCase() === trimmedName.toLowerCase());
+  }, [trimmedName, products]);
 
   function handleAdd(e) {
     e.preventDefault();
@@ -175,19 +177,23 @@ function BookOrderForm({ bookType, bookEmoji, products, onAddRecord, idPrefix })
       </form>
     </div>
   );
-}
+});
 
 /* ── Main Sales Dashboard ── */
-export default function SalesDashboard({ products, records, onAddRecord, activeTab }) {
+export default memo(function SalesDashboard({ products, records, onAddRecord, activeTab }) {
   const [bookTab, setBookTab] = useState('Large Book');
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Filter records by book type for the My Orders tab
-  const filteredByBook = records.filter(r => (r.bookType || 'Large Book') === bookTab);
+  // Filter records by book type for the My Orders tab (memoized)
+  const filteredByBook = useMemo(() =>
+    records.filter(r => (r.bookType || 'Large Book') === bookTab)
+  , [records, bookTab]);
 
   const totalPages = Math.max(1, Math.ceil(filteredByBook.length / 10));
   const activePage = Math.min(currentPage, totalPages);
-  const paginatedRecords = filteredByBook.slice((activePage - 1) * 10, activePage * 10);
+  const paginatedRecords = useMemo(() =>
+    filteredByBook.slice((activePage - 1) * 10, activePage * 10)
+  , [filteredByBook, activePage]);
 
   function handleBookTabChange(tab) {
     setBookTab(tab);
@@ -294,4 +300,4 @@ export default function SalesDashboard({ products, records, onAddRecord, activeT
       )}
     </div>
   );
-}
+});

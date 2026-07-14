@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo, memo } from 'react';
 import Pagination from './Pagination';
 import { useFirestoreSearch } from '../hooks/useFirestoreSearch';
 
-export default function ProductHistory({ user, products = [], onDeleteHistory, onDeleteAllHistory }) {
+export default memo(function ProductHistory({ user, products = [], onDeleteHistory, onDeleteAllHistory }) {
   const isAdmin = user?.role === 'admin';
 
   const {
@@ -28,13 +28,14 @@ export default function ProductHistory({ user, products = [], onDeleteHistory, o
   const totalPages = Math.max(1, Math.ceil(totalEntries / 10));
   const activePage = Math.min(currentPage, totalPages);
 
-  const uniqueProductNames = Array.from(new Set(products.map(p => p.name)));
+  const uniqueProductNames = useMemo(() => Array.from(new Set(products.map(p => p.name))), [products]);
 
-  const filteredSuggestions = searchQuery.trim()
-    ? uniqueProductNames
-        .filter(name => name.toLowerCase().includes(searchQuery.toLowerCase()))
-        .slice(0, 10)
-    : [];
+  const filteredSuggestions = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    return uniqueProductNames
+      .filter(name => name.toLowerCase().includes(searchQuery.toLowerCase()))
+      .slice(0, 10);
+  }, [searchQuery, uniqueProductNames]);
 
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [confirmAll, setConfirmAll] = useState(false);
@@ -228,4 +229,4 @@ export default function ProductHistory({ user, products = [], onDeleteHistory, o
       </div>
     </div>
   );
-}
+});

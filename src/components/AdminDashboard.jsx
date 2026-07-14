@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo, memo } from 'react';
 import Pagination from './Pagination';
 
-export default function AdminDashboard({
+export default memo(function AdminDashboard({
   records,
   products,
   onApproveRecord,
@@ -21,29 +21,34 @@ export default function AdminDashboard({
   const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  // Suggestions come from products only
-  const uniqueProductNames = Array.from(new Set(products.map(p => p.name)));
+  // Suggestions come from products only (memoized)
+  const uniqueProductNames = useMemo(() => Array.from(new Set(products.map(p => p.name))), [products]);
 
-  const filteredSuggestions = searchQuery.trim()
-    ? uniqueProductNames
-        .filter(name => name.toLowerCase().includes(searchQuery.toLowerCase()))
-        .slice(0, 10)
-    : [];
+  const filteredSuggestions = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    return uniqueProductNames
+      .filter(name => name.toLowerCase().includes(searchQuery.toLowerCase()))
+      .slice(0, 10);
+  }, [searchQuery, uniqueProductNames]);
 
-  const filteredByBook = records.filter(r => (r.bookType || 'Large Book') === bookTab);
+  const filteredByBook = useMemo(() =>
+    records.filter(r => (r.bookType || 'Large Book') === bookTab)
+  , [records, bookTab]);
 
-  // Filter records by book type and search query client-side using appliedSearchQuery
-  const filteredRecords = records.filter(r => {
+  // Filter records by book type and search query client-side using appliedSearchQuery (memoized)
+  const filteredRecords = useMemo(() => records.filter(r => {
     const matchesBook = (r.bookType || 'Large Book') === bookTab;
     const matchesSearch = appliedSearchQuery.trim()
       ? r.productName.toLowerCase().includes(appliedSearchQuery.toLowerCase())
       : true;
     return matchesBook && matchesSearch;
-  });
+  }), [records, bookTab, appliedSearchQuery]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRecords.length / 10));
   const activePage = Math.min(currentPage, totalPages);
-  const paginatedRecords = filteredRecords.slice((activePage - 1) * 10, activePage * 10);
+  const paginatedRecords = useMemo(() =>
+    filteredRecords.slice((activePage - 1) * 10, activePage * 10)
+  , [filteredRecords, activePage]);
 
   const [editingOrderId, setEditingOrderId] = useState(null);
   const [editProductName, setEditProductName] = useState('');
@@ -580,4 +585,4 @@ export default function AdminDashboard({
       </div>
     </div>
   );
-}
+});

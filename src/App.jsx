@@ -80,9 +80,10 @@ export default function App() {
     }
   }
 
-  // Listen to pending orders real-time (only when logged in)
+  // Listen to pending orders real-time (only when orders/dashboard tabs are active)
   useEffect(() => {
     if (!user) return;
+    if (activeTab !== 'add' && activeTab !== 'records' && activeTab !== 'admin') return;
     console.log('[Firestore] Attaching real-time listener for pending orders');
     const q = query(collection(db, 'orders'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -132,7 +133,7 @@ export default function App() {
       console.log('[Firestore] Detaching real-time listener for pending orders');
       unsubscribe();
     };
-  }, [user]);
+  }, [user, activeTab]);
 
   // Listen to products real-time (only when logged in)
   useEffect(() => {
@@ -151,9 +152,9 @@ export default function App() {
     };
   }, [user]);
 
-  // Listen to product approvals real-time (only when logged in)
+  // Listen to product approvals real-time (only when approvals tab is active)
   useEffect(() => {
-    if (!user) return;
+    if (!user || activeTab !== 'approvals') return;
     console.log('[Firestore] Attaching real-time listener for product approvals');
     const q = query(collection(db, 'productApprovals'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -166,7 +167,7 @@ export default function App() {
       console.log('[Firestore] Detaching real-time listener for product approvals');
       unsubscribe();
     };
-  }, [user]);
+  }, [user, activeTab]);
 
   function handleLogin(session) {
     setUser(session);
