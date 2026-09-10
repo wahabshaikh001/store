@@ -29,7 +29,7 @@ export default memo(function ApprovedOrders({ user, products = [], onDeleteAppro
   } = useFirestoreSearch({
     collectionName: 'approvedOrders',
     orderByField: 'approvedAt',
-    orderDirection: 'asc',
+    orderDirection: 'desc',
     pageSize: 10,
     extraFilters: [{ field: 'bookType', operator: '==', value: bookTab }]
   });
