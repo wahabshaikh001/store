@@ -11,6 +11,7 @@ export default function ProductApprovals({ user, approvals, onApprove, onDelete,
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [editingId, setEditingId] = useState(null);
+  const [editSenderName, setEditSenderName] = useState('');
   const [editName, setEditName] = useState('');
   const [editQuantity, setEditQuantity] = useState('');
 
@@ -80,6 +81,7 @@ export default function ProductApprovals({ user, approvals, onApprove, onDelete,
 
   function startEdit(req) {
     setEditingId(req.id);
+    setEditSenderName(req.senderName || '');
     setEditName(req.productName || '');
     setEditQuantity(String(req.quantity ?? ''));
     setError('');
@@ -88,16 +90,18 @@ export default function ProductApprovals({ user, approvals, onApprove, onDelete,
 
   function cancelEdit() {
     setEditingId(null);
+    setEditSenderName('');
     setEditName('');
     setEditQuantity('');
   }
 
   async function saveEdit(id) {
     setError('');
+    const trimmedSender = editSenderName.trim();
     const trimmedName = editName.trim();
     const qtyVal = parseFloat(editQuantity);
 
-    if (!trimmedName || editQuantity === '') {
+    if (!trimmedSender || !trimmedName || editQuantity === '') {
       setError('Please fill in all fields.');
       return;
     }
@@ -108,6 +112,7 @@ export default function ProductApprovals({ user, approvals, onApprove, onDelete,
 
     try {
       const res = await onEditApproval(id, {
+        senderName: trimmedSender,
         productName: trimmedName,
         quantity: qtyVal
       });
@@ -192,6 +197,7 @@ export default function ProductApprovals({ user, approvals, onApprove, onDelete,
                     )}
                     <th style={{ width: '60px' }}>S/No</th>
                     <th>Date</th>
+                    <th>Sender Name</th>
                     <th>Product Name</th>
                     <th>Quantity</th>
                     <th>Action Type</th>
@@ -230,9 +236,25 @@ export default function ProductApprovals({ user, approvals, onApprove, onDelete,
                             <input
                               type="text"
                               className="form-control form-control-sm"
+                              value={editSenderName}
+                              onChange={e => setEditSenderName(e.target.value)}
+                              style={{ padding: '0.35rem 0.6rem' }}
+                              placeholder="Sender Name"
+                            />
+                          </td>
+                        ) : (
+                          <td style={{ fontWeight: 500, color: 'var(--text-muted)' }}>{r.senderName?.trim() || '--'}</td>
+                        )}
+
+                        {isEditing ? (
+                          <td>
+                            <input
+                              type="text"
+                              className="form-control form-control-sm"
                               value={editName}
                               onChange={e => setEditName(e.target.value)}
                               style={{ padding: '0.35rem 0.6rem' }}
+                              placeholder="Product Name"
                             />
                           </td>
                         ) : (

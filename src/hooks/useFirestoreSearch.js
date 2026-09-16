@@ -4,6 +4,7 @@ import {
   collection,
   query,
   where,
+  or,
   orderBy,
   limit,
   startAfter,
@@ -17,6 +18,7 @@ export function useFirestoreSearch({
   orderDirection = 'asc',
   pageSize = 10,
   filterField = 'productName',
+  filterFields = [],
   extraFilters = []
 }) {
   const [currentPage, setCurrentPage] = useState(1);
@@ -33,6 +35,7 @@ export function useFirestoreSearch({
   const activeRequestId = useRef(0);
 
   const extraFiltersKey = JSON.stringify(extraFilters);
+  const filterFieldsKey = JSON.stringify(filterFields);
 
   // Query builder helper
   const buildBaseQuery = useCallback((searchVal) => {
@@ -46,11 +49,19 @@ export function useFirestoreSearch({
 
     // Apply search filter if present
     if (searchVal && searchVal.trim()) {
-      q = query(q, where(filterField, '==', searchVal.trim()));
+      const trimmed = searchVal.trim();
+      const parsedFilterFields = JSON.parse(filterFieldsKey);
+      if (parsedFilterFields.length > 1) {
+        q = query(q, or(...parsedFilterFields.map(f => where(f, '==', trimmed))));
+      } else if (parsedFilterFields.length === 1) {
+        q = query(q, where(parsedFilterFields[0], '==', trimmed));
+      } else {
+        q = query(q, where(filterField, '==', trimmed));
+      }
     }
 
     return q;
-  }, [collectionName, filterField, extraFiltersKey]);
+  }, [collectionName, filterField, filterFieldsKey, extraFiltersKey]);
 
   const fetchCount = useCallback(async () => {
     try {

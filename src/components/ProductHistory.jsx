@@ -22,20 +22,35 @@ export default memo(function ProductHistory({ user, products = [], onDeleteHisto
     collectionName: 'productHistory',
     orderByField: 'createdAt',
     orderDirection: 'desc',
-    pageSize: 10
+    pageSize: 10,
+    filterFields: ['productName', 'senderName']
   });
 
   const totalPages = Math.max(1, Math.ceil(totalEntries / 10));
   const activePage = Math.min(currentPage, totalPages);
 
-  const uniqueProductNames = useMemo(() => Array.from(new Set(products.map(p => p.name))), [products]);
+  const uniqueProductNames = useMemo(() => Array.from(new Set(products.map(p => p.name).filter(Boolean))), [products]);
+  const uniqueSenderNames = useMemo(() => {
+    const s = new Set();
+    products.forEach(p => {
+      if (p.senderName && p.senderName.trim() && p.senderName.trim() !== '--') {
+        s.add(p.senderName.trim());
+      }
+    });
+    return Array.from(s);
+  }, [products]);
 
   const filteredSuggestions = useMemo(() => {
     if (!searchQuery.trim()) return [];
-    return uniqueProductNames
-      .filter(name => name.toLowerCase().includes(searchQuery.toLowerCase()))
-      .slice(0, 10);
-  }, [searchQuery, uniqueProductNames]);
+    const query = searchQuery.toLowerCase();
+    const prodMatches = uniqueProductNames
+      .filter(name => name.toLowerCase().includes(query))
+      .map(name => ({ type: 'Product', value: name }));
+    const senderMatches = uniqueSenderNames
+      .filter(name => name.toLowerCase().includes(query))
+      .map(name => ({ type: 'Sender', value: name }));
+    return [...prodMatches, ...senderMatches].slice(0, 10);
+  }, [searchQuery, uniqueProductNames, uniqueSenderNames]);
 
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [confirmAll, setConfirmAll] = useState(false);
@@ -62,6 +77,62 @@ export default memo(function ProductHistory({ user, products = [], onDeleteHisto
     }
   }
 
+  // Export to Excel / CSV
+  function handleExportExcel() {
+    const headers = ['S/NO', 'Date', 'Sender Name', 'Product Name', 'Quantity Added'];
+    const rows = historyRecords.map((r, idx) => [
+      (activePage - 1) * 10 + idx + 1,
+      `"${(r.date || '—').replace(/"/g, '""')}"`,
+      `"${(r.senderName?.trim() || '--').replace(/"/g, '""')}"`,
+      `"${(r.productName || '').replace(/"/g, '""')}"`,
+      r.quantityAdded
+    ]);
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", "product_history.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  // Copy to Clipboard
+  function handleCopy() {
+    const headers = 'S/NO\tDate\tSender Name\tProduct Name\tQuantity Added';
+    const rows = historyRecords.map((r, idx) => `${(activePage - 1) * 10 + idx + 1}\t${r.date || '—'}\t${r.senderName?.trim() || '--'}\t${r.productName || ''}\t+${r.quantityAdded}`).join('\n');
+    navigator.clipboard.writeText(headers + '\n' + rows);
+    alert('Product history copied to clipboard!');
+  }
+
+  // Print / Save PDF
+  function handlePrint() {
+    const printWindow = window.open('', '', 'height=600,width=800');
+    printWindow.document.write('<html><head><title>Product History Report</title>');
+    printWindow.document.write('<style>');
+    printWindow.document.write('body { font-family: sans-serif; padding: 25px; color: #0f172a; }');
+    printWindow.document.write('h2 { color: #4f46e5; text-align: center; margin-bottom: 5px; }');
+    printWindow.document.write('p { text-align: center; color: #64748b; font-size: 0.9rem; margin-bottom: 20px; }');
+    printWindow.document.write('table { width: 100%; border-collapse: collapse; margin-top: 10px; }');
+    printWindow.document.write('th, td { border: 1px solid #e2e8f0; padding: 10px; text-align: left; font-size: 0.9rem; }');
+    printWindow.document.write('th { background-color: #f8fafc; font-weight: bold; color: #475569; }');
+    printWindow.document.write('</style></head><body>');
+    printWindow.document.write('<h2>Product History Report - StoreManager</h2>');
+    printWindow.document.write(`<p>Generated on: ${new Date().toLocaleString()}</p>`);
+    printWindow.document.write('<table><thead><tr><th>S/NO</th><th>Date</th><th>Sender Name</th><th>Product Name</th><th>Quantity Added</th></tr></thead><tbody>');
+    
+    historyRecords.forEach((r, idx) => {
+      printWindow.document.write(
+        `<tr><td>${(activePage - 1) * 10 + idx + 1}</td><td>${r.date || '—'}</td><td>${r.senderName?.trim() || '--'}</td><td>${r.productName || ''}</td><td>+${r.quantityAdded}</td></tr>`
+      );
+    });
+    
+    printWindow.document.write('</tbody></table></body></html>');
+    printWindow.document.close();
+    printWindow.print();
+  }
+
   return (
     <div className="main-layout animate-fade">
       <div className="card">
@@ -72,30 +143,41 @@ export default memo(function ProductHistory({ user, products = [], onDeleteHisto
         >
           <span>📋 Product History List</span>
 
-          {isAdmin && totalEntries > 0 && (
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              {confirmAll && (
-                <span style={{ fontSize: '0.8rem', color: 'var(--danger)', fontWeight: 600 }}>
-                  Are you sure?
-                </span>
-              )}
-              <button
-                className="btn btn-danger btn-sm"
-                onClick={handleDeleteAll}
-                disabled={loading || isFetching}
-              >
-                {loading ? 'Deleting…' : confirmAll ? '⚠️ Confirm Delete All' : '🗑️ Delete All History'}
-              </button>
-              {confirmAll && (
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Export options */}
+            {historyRecords.length > 0 && (
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                <button className="btn btn-secondary btn-sm" onClick={handlePrint}>📄 PDF / Print</button>
+                <button className="btn btn-secondary btn-sm" onClick={handleExportExcel}>📥 Excel</button>
+                <button className="btn btn-secondary btn-sm" onClick={handleCopy}>📋 Copy</button>
+              </div>
+            )}
+
+            {isAdmin && totalEntries > 0 && (
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                {confirmAll && (
+                  <span style={{ fontSize: '0.8rem', color: 'var(--danger)', fontWeight: 600 }}>
+                    Are you sure?
+                  </span>
+                )}
                 <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => setConfirmAll(false)}
+                  className="btn btn-danger btn-sm"
+                  onClick={handleDeleteAll}
+                  disabled={loading || isFetching}
                 >
-                  Cancel
+                  {loading ? 'Deleting…' : confirmAll ? '⚠️ Confirm Delete All' : '🗑️ Delete All History'}
                 </button>
-              )}
-            </div>
-          )}
+                {confirmAll && (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setConfirmAll(false)}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Search Bar */}
@@ -105,7 +187,7 @@ export default memo(function ProductHistory({ user, products = [], onDeleteHisto
               type="text"
               className="form-control"
               style={{ width: '100%' }}
-              placeholder="Search products..."
+              placeholder="Search by product or sender name..."
               value={searchQuery}
               onChange={e => {
                 setSearchQuery(e.target.value);
@@ -125,21 +207,22 @@ export default memo(function ProductHistory({ user, products = [], onDeleteHisto
             {showSuggestions && searchQuery.trim().length > 0 && (
               <div className="suggestions-dropdown" style={{ top: '100%', left: 0, right: 0 }}>
                 {filteredSuggestions.length > 0 ? (
-                  filteredSuggestions.map((name, index) => (
+                  filteredSuggestions.map((item, index) => (
                     <div
                       key={index}
                       className="suggestion-item"
                       onMouseDown={e => {
                         e.preventDefault();
-                        executeSearch(name);
+                        executeSearch(item.value);
                         setShowSuggestions(false);
                       }}
                     >
-                      <span style={{ fontWeight: 600 }}>{name}</span>
+                      <span style={{ fontWeight: 600 }}>{item.value}</span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>({item.type})</span>
                     </div>
                   ))
                 ) : (
-                  <div className="suggestion-no-match">No matching products found</div>
+                  <div className="suggestion-no-match">No matching products or senders found</div>
                 )}
               </div>
             )}
@@ -190,6 +273,7 @@ export default memo(function ProductHistory({ user, products = [], onDeleteHisto
                   <tr>
                     <th style={{ width: '60px' }}>S/No</th>
                     <th>Date</th>
+                    <th>Sender Name</th>
                     <th>Product Name</th>
                     <th>Quantity Added</th>
                     {isAdmin && <th style={{ width: '110px' }}>Delete</th>}
@@ -200,6 +284,7 @@ export default memo(function ProductHistory({ user, products = [], onDeleteHisto
                     <tr key={r.id}>
                       <td style={{ fontWeight: 600 }}>{(activePage - 1) * 10 + i + 1}</td>
                       <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{r.date || '—'}</td>
+                      <td style={{ fontWeight: 500, color: 'var(--text-muted)' }}>{r.senderName?.trim() || '--'}</td>
                       <td style={{ fontWeight: 500 }}>{r.productName}</td>
                       <td style={{ fontWeight: 600, color: 'var(--primary)' }}>+{r.quantityAdded}</td>
                       {isAdmin && (

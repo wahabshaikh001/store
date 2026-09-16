@@ -15,6 +15,20 @@
       ]
     },
     {
+      "collectionGroup": "productHistory",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "senderName",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "approvedOrders",
       "queryScope": "COLLECTION",
       "fields": [

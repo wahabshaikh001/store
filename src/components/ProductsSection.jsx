@@ -5,6 +5,7 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
   const isAdmin = user?.role === 'admin';
   
   // Form states
+  const [senderName, setSenderName] = useState('');
   const [name, setName] = useState('');
   const [quantity, setQuantity] = useState('');
   const [error, setError] = useState('');
@@ -24,9 +25,9 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
 
-
   // Inline edit states
   const [editingId, setEditingId] = useState(null);
+  const [editSenderName, setEditSenderName] = useState('');
   const [editName, setEditName] = useState('');
   const [editQuantity, setEditQuantity] = useState('');
   const [editError, setEditError] = useState('');
@@ -37,11 +38,12 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
     setError('');
     setSuccess('');
 
+    const trimmedSender = senderName.trim();
     const trimmedName = name.trim();
     const qtyVal = parseFloat(quantity);
 
-    if (!trimmedName || quantity === '') {
-      setError('Please fill in both fields.');
+    if (!trimmedSender || !trimmedName || quantity === '') {
+      setError('Please fill in all fields.');
       return;
     }
     if (isNaN(qtyVal) || qtyVal < 0) {
@@ -52,7 +54,8 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
     // Check duplicate name case-insensitively
     const duplicate = products.find(p => p.name.toLowerCase() === trimmedName.toLowerCase());
 
-    onAddProduct({ name: trimmedName, quantity: qtyVal });
+    onAddProduct({ senderName: trimmedSender, name: trimmedName, quantity: qtyVal });
+    setSenderName('');
     setName('');
     setQuantity('');
     setSuccess(duplicate ? 'Product stock updated successfully!' : 'Product added successfully!');
@@ -62,6 +65,7 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
   // Handle inline edit click
   function startEdit(product) {
     setEditingId(product.id);
+    setEditSenderName(product.senderName || '');
     setEditName(product.name);
     setEditQuantity(String(product.quantity));
     setEditError('');
@@ -70,6 +74,7 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
   // Cancel inline edit
   function cancelEdit() {
     setEditingId(null);
+    setEditSenderName('');
     setEditName('');
     setEditQuantity('');
     setEditError('');
@@ -78,10 +83,11 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
   // Save inline edit
   function saveEdit(id) {
     setEditError('');
+    const trimmedSender = editSenderName.trim();
     const trimmedName = editName.trim();
     const qtyVal = parseFloat(editQuantity);
 
-    if (!trimmedName || editQuantity === '') {
+    if (!trimmedSender || !trimmedName || editQuantity === '') {
       setEditError('Fields cannot be empty.');
       return;
     }
@@ -97,13 +103,16 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
       return;
     }
 
-    onEditProduct(id, { name: trimmedName, quantity: qtyVal });
+    onEditProduct(id, { senderName: trimmedSender, name: trimmedName, quantity: qtyVal });
     setEditingId(null);
   }
 
-  // Filter products (memoized)
+  // Filter products (memoized, searching both product name and sender name client-side)
   const filteredProducts = useMemo(() => products.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
+    const trimmedSearch = search.trim().toLowerCase();
+    const matchesSearch = !trimmedSearch ||
+      p.name.toLowerCase().includes(trimmedSearch) ||
+      (p.senderName && p.senderName.toLowerCase().includes(trimmedSearch));
     const matchesLowStock = filterLowStock ? p.quantity <= 10 : true;
     return matchesSearch && matchesLowStock;
   }), [products, search, filterLowStock]);
@@ -116,9 +125,10 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
 
   // Export to Excel / CSV
   function handleExportExcel() {
-    const headers = ['S/NO', 'Product Name', 'Product Quantity'];
+    const headers = ['S/NO', 'Sender Name', 'Product Name', 'Product Quantity'];
     const rows = filteredProducts.map((p, idx) => [
       idx + 1,
+      `"${(p.senderName?.trim() || '--').replace(/"/g, '""')}"`,
       `"${p.name.replace(/"/g, '""')}"`,
       p.quantity
     ]);
@@ -135,8 +145,8 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
 
   // Copy to Clipboard
   function handleCopy() {
-    const headers = 'S/NO\tProduct Name\tProduct Quantity';
-    const rows = filteredProducts.map((p, idx) => `${idx + 1}\t${p.name}\t${p.quantity}`).join('\n');
+    const headers = 'S/NO\tSender Name\tProduct Name\tProduct Quantity';
+    const rows = filteredProducts.map((p, idx) => `${idx + 1}\t${p.senderName?.trim() || '--'}\t${p.name}\t${p.quantity}`).join('\n');
     navigator.clipboard.writeText(headers + '\n' + rows);
     alert('Products table copied to clipboard!');
   }
@@ -156,12 +166,12 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
     printWindow.document.write('</style></head><body>');
     printWindow.document.write('<h2>Inventory Report - StoreManager</h2>');
     printWindow.document.write(`<p>Generated on: ${new Date().toLocaleString()}</p>`);
-    printWindow.document.write('<table><thead><tr><th>S/NO</th><th>Product Name</th><th>Product Quantity</th></tr></thead><tbody>');
+    printWindow.document.write('<table><thead><tr><th>S/NO</th><th>Sender Name</th><th>Product Name</th><th>Product Quantity</th></tr></thead><tbody>');
     
     filteredProducts.forEach((p, idx) => {
       const isLow = p.quantity <= 10;
       printWindow.document.write(
-        `<tr class="${isLow ? 'low-stock' : ''}"><td>${idx + 1}</td><td>${p.name}</td><td>${p.quantity}</td></tr>`
+        `<tr class="${isLow ? 'low-stock' : ''}"><td>${idx + 1}</td><td>${p.senderName?.trim() || '--'}</td><td>${p.name}</td><td>${p.quantity}</td></tr>`
       );
     });
     
@@ -181,6 +191,15 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
 
         <form onSubmit={handleAddSubmit}>
           <div className="add-order-row">
+            <div style={{ flex: 1.5, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Sender Name (e.g. Ali)"
+                value={senderName}
+                onChange={e => setSenderName(e.target.value)}
+              />
+            </div>
             <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: '0.4rem', position: 'relative' }}>
               <input
                 type="text"
@@ -261,7 +280,7 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
             type="text"
             className="form-control"
             style={{ flex: 1, minWidth: '200px' }}
-            placeholder="Search products..."
+            placeholder="Search by product or sender name..."
             value={search}
             onChange={e => { setSearch(e.target.value); setCurrentPage(1); }}
           />
@@ -290,6 +309,7 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
               <thead>
                 <tr>
                   <th style={{ width: '80px' }}>S/No</th>
+                  <th>Sender Name</th>
                   <th>Product Name</th>
                   <th>Product Quantity</th>
                   {isAdmin && <th style={{ width: '180px' }}>Edit/Delete</th>}
@@ -313,9 +333,25 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
                           <input
                             type="text"
                             className="form-control form-control-sm"
+                            value={editSenderName}
+                            onChange={e => setEditSenderName(e.target.value)}
+                            style={{ padding: '0.35rem 0.6rem' }}
+                            placeholder="Sender Name"
+                          />
+                        </td>
+                      ) : (
+                        <td style={{ fontWeight: 500, color: 'var(--text-muted)' }}>{p.senderName?.trim() || '--'}</td>
+                      )}
+
+                      {isEditing ? (
+                        <td>
+                          <input
+                            type="text"
+                            className="form-control form-control-sm"
                             value={editName}
                             onChange={e => setEditName(e.target.value)}
                             style={{ padding: '0.35rem 0.6rem' }}
+                            placeholder="Product Name"
                           />
                           {editError && <div style={{ color: 'var(--danger)', fontSize: '0.72rem', marginTop: '0.2rem' }}>{editError}</div>}
                         </td>

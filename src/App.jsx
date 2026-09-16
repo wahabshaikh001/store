@@ -193,6 +193,7 @@ export default function App() {
 
       console.log('[Firestore] Submitting product request for approval...');
       await addDoc(collection(db, 'productApprovals'), {
+        senderName: data.senderName ? data.senderName.trim() : '',
         productName: data.name.trim(),
         quantity: data.quantity,
         actionType: 'New Product',
@@ -215,6 +216,7 @@ export default function App() {
       console.log('[Firestore] Submitting product update request for approval...');
       await addDoc(collection(db, 'productApprovals'), {
         productId: id,
+        senderName: data.senderName ? data.senderName.trim() : '',
         productName: data.name.trim(),
         quantity: data.quantity,
         actionType: 'Product Update',
@@ -230,6 +232,7 @@ export default function App() {
     try {
       console.log('[Firestore] Updating product approval request...');
       await updateDoc(doc(db, 'productApprovals', approvalId), {
+        senderName: updatedData.senderName ? updatedData.senderName.trim() : '',
         productName: updatedData.productName.trim(),
         quantity: Number(updatedData.quantity)
       });
@@ -252,6 +255,7 @@ export default function App() {
         
         const reqData = approvalSnap.data();
         const actionType = reqData.actionType;
+        const reqSender = (reqData.senderName || '').trim();
         const reqName = reqData.productName;
         const reqQty = reqData.quantity;
         const reqDate = reqData.date || new Date().toISOString().split('T')[0];
@@ -280,18 +284,21 @@ export default function App() {
           if (isNew) {
             const newProdRef = doc(collection(db, 'products'));
             transaction.set(newProdRef, {
+              senderName: reqSender,
               name: finalProductName,
               quantity: reqQty,
               createdAt: serverTimestamp()
             });
           } else {
             transaction.update(targetProductRef, {
+              ...(reqSender ? { senderName: reqSender } : {}),
               quantity: newQty
             });
           }
 
           const historyRef = doc(collection(db, 'productHistory'));
           transaction.set(historyRef, {
+            ...(reqSender ? { senderName: reqSender } : {}),
             productName: finalProductName,
             quantityAdded: reqQty,
             date: reqDate,
@@ -312,6 +319,7 @@ export default function App() {
           const prevQty = prevData.quantity || 0;
           
           transaction.update(prodRef, {
+            ...(reqSender ? { senderName: reqSender } : {}),
             name: reqName,
             quantity: reqQty
           });
@@ -320,6 +328,7 @@ export default function App() {
             const qtyAdded = Number((reqQty - prevQty).toFixed(4));
             const historyRef = doc(collection(db, 'productHistory'));
             transaction.set(historyRef, {
+              ...(reqSender ? { senderName: reqSender } : {}),
               productName: reqName,
               quantityAdded: qtyAdded,
               date: reqDate,
@@ -395,6 +404,7 @@ export default function App() {
         });
 
         for (const req of approvalsData) {
+          const reqSender = (req.senderName || '').trim();
           const reqName = req.productName;
           const reqQty = req.quantity;
           const reqDate = req.date || new Date().toISOString().split('T')[0];
@@ -408,10 +418,14 @@ export default function App() {
               const newQty = Number((currentQty + reqQty).toFixed(4));
               existingProduct.data.quantity = newQty;
               
-              transaction.update(existingProduct.ref, { quantity: newQty });
+              transaction.update(existingProduct.ref, {
+                ...(reqSender ? { senderName: reqSender } : {}),
+                quantity: newQty
+              });
 
               const historyRef = doc(collection(db, 'productHistory'));
               transaction.set(historyRef, {
+                ...(reqSender ? { senderName: reqSender } : {}),
                 productName: existingProduct.data.name || reqName,
                 quantityAdded: reqQty,
                 date: reqDate,
@@ -420,6 +434,7 @@ export default function App() {
             } else {
               const newProdRef = doc(collection(db, 'products'));
               const newProductData = {
+                senderName: reqSender,
                 name: reqName,
                 quantity: reqQty,
                 createdAt: serverTimestamp()
@@ -429,6 +444,7 @@ export default function App() {
 
               const historyRef = doc(collection(db, 'productHistory'));
               transaction.set(historyRef, {
+                ...(reqSender ? { senderName: reqSender } : {}),
                 productName: reqName,
                 quantityAdded: reqQty,
                 date: reqDate,
@@ -447,6 +463,7 @@ export default function App() {
             existingProduct.data.name = reqName;
 
             transaction.update(existingProduct.ref, {
+              ...(reqSender ? { senderName: reqSender } : {}),
               name: reqName,
               quantity: reqQty
             });
@@ -455,6 +472,7 @@ export default function App() {
               const qtyAdded = Number((reqQty - prevQty).toFixed(4));
               const historyRef = doc(collection(db, 'productHistory'));
               transaction.set(historyRef, {
+                ...(reqSender ? { senderName: reqSender } : {}),
                 productName: reqName,
                 quantityAdded: qtyAdded,
                 date: reqDate,
