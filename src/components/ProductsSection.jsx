@@ -3,7 +3,7 @@ import Pagination from './Pagination';
 
 export default memo(function ProductsSection({ user, products, onAddProduct, onEditProduct, onDeleteProduct }) {
   const isAdmin = user?.role === 'admin';
-  
+
   // Form states
   const [senderName, setSenderName] = useState('');
   const [name, setName] = useState('');
@@ -113,7 +113,7 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
     const matchesSearch = !trimmedSearch ||
       p.name.toLowerCase().includes(trimmedSearch) ||
       (p.senderName && p.senderName.toLowerCase().includes(trimmedSearch));
-    const matchesLowStock = filterLowStock ? p.quantity <= 10 : true;
+    const matchesLowStock = filterLowStock ? p.quantity <= 100 : true;
     return matchesSearch && matchesLowStock;
   }), [products, search, filterLowStock]);
 
@@ -121,7 +121,7 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
   const activePage = Math.min(currentPage, totalPages);
   const paginatedProducts = useMemo(() =>
     filteredProducts.slice((activePage - 1) * 10, activePage * 10)
-  , [filteredProducts, activePage]);
+    , [filteredProducts, activePage]);
 
   // Export to Excel / CSV
   function handleExportExcel() {
@@ -167,14 +167,14 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
     printWindow.document.write('<h2>Inventory Report - StoreManager</h2>');
     printWindow.document.write(`<p>Generated on: ${new Date().toLocaleString()}</p>`);
     printWindow.document.write('<table><thead><tr><th>S/NO</th><th>Sender Name</th><th>Product Name</th><th>Product Quantity</th></tr></thead><tbody>');
-    
+
     filteredProducts.forEach((p, idx) => {
-      const isLow = p.quantity <= 10;
+      const isLow = p.quantity <= 100;
       printWindow.document.write(
         `<tr class="${isLow ? 'low-stock' : ''}"><td>${idx + 1}</td><td>${p.senderName?.trim() || '--'}</td><td>${p.name}</td><td>${p.quantity}</td></tr>`
       );
     });
-    
+
     printWindow.document.write('</tbody></table></body></html>');
     printWindow.document.close();
     printWindow.print();
@@ -185,7 +185,7 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
       {/* ➕ Add Product Card */}
       <div className="card">
         <div className="card-title">➕ Add New Product</div>
-        
+
         {error && <div className="alert alert-danger">{error}</div>}
         {success && <div className="alert alert-success">{success}</div>}
 
@@ -231,10 +231,10 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
                         }}
                       >
                         <span style={{ fontWeight: 600 }}>{p.name}</span>
-                        <span style={{ 
-                          fontSize: '0.75rem', 
-                          color: p.quantity <= 10 ? 'var(--danger)' : 'var(--text-muted)',
-                          fontWeight: p.quantity <= 10 ? 600 : 500
+                        <span style={{
+                          fontSize: '0.75rem',
+                          color: p.quantity <= 100 ? 'var(--danger)' : 'var(--text-muted)',
+                          fontWeight: p.quantity <= 100 ? 600 : 500
                         }}>
                           (Current Qty: {p.quantity})
                         </span>
@@ -265,7 +265,7 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
       <div className="card">
         <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
           <span>📦 Product Inventory</span>
-          
+
           {/* Export options */}
           <div style={{ display: 'flex', gap: '0.4rem' }}>
             <button className="btn btn-secondary btn-sm" onClick={handlePrint}>📄 PDF / Print</button>
@@ -284,8 +284,8 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
             value={search}
             onChange={e => { setSearch(e.target.value); setCurrentPage(1); }}
           />
-          <button 
-            type="button" 
+          <button
+            type="button"
             className={`btn btn-sm ${filterLowStock ? 'btn-danger' : 'btn-secondary'}`}
             onClick={() => { setFilterLowStock(!filterLowStock); setCurrentPage(1); }}
           >
@@ -305,126 +305,126 @@ export default memo(function ProductsSection({ user, products, onAddProduct, onE
         ) : (
           <>
             <div className="table-wrap">
-            <table className="records-table">
-              <thead>
-                <tr>
-                  <th style={{ width: '80px' }}>S/No</th>
-                  <th>Sender Name</th>
-                  <th>Product Name</th>
-                  <th>Product Quantity</th>
-                  {isAdmin && <th style={{ width: '180px' }}>Edit/Delete</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedProducts.map((p, i) => {
-                  const isLowStock = p.quantity <= 10;
-                  const isEditing = p.id === editingId;
+              <table className="records-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: '80px' }}>S/No</th>
+                    <th>Sender Name</th>
+                    <th>Product Name</th>
+                    <th>Product Quantity</th>
+                    {isAdmin && <th style={{ width: '180px' }}>Edit/Delete</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedProducts.map((p, i) => {
+                    const isLowStock = p.quantity <= 100;
+                    const isEditing = p.id === editingId;
 
-                  return (
-                    <tr 
-                      key={p.id} 
-                      className={isLowStock ? "low-stock-row" : ""}
-                      style={isLowStock ? { background: '#fef2f2', borderLeft: '4px solid var(--danger)' } : {}}
-                    >
-                      <td style={{ fontWeight: 600 }}>{(activePage - 1) * 10 + i + 1}</td>
-                      
-                      {isEditing ? (
-                        <td>
-                          <input
-                            type="text"
-                            className="form-control form-control-sm"
-                            value={editSenderName}
-                            onChange={e => setEditSenderName(e.target.value)}
-                            style={{ padding: '0.35rem 0.6rem' }}
-                            placeholder="Sender Name"
-                          />
-                        </td>
-                      ) : (
-                        <td style={{ fontWeight: 500, color: 'var(--text-muted)' }}>{p.senderName?.trim() || '--'}</td>
-                      )}
+                    return (
+                      <tr
+                        key={p.id}
+                        className={isLowStock ? "low-stock-row" : ""}
+                        style={isLowStock ? { background: '#fef2f2', borderLeft: '4px solid var(--danger)' } : {}}
+                      >
+                        <td style={{ fontWeight: 600 }}>{(activePage - 1) * 10 + i + 1}</td>
 
-                      {isEditing ? (
-                        <td>
-                          <input
-                            type="text"
-                            className="form-control form-control-sm"
-                            value={editName}
-                            onChange={e => setEditName(e.target.value)}
-                            style={{ padding: '0.35rem 0.6rem' }}
-                            placeholder="Product Name"
-                          />
-                          {editError && <div style={{ color: 'var(--danger)', fontSize: '0.72rem', marginTop: '0.2rem' }}>{editError}</div>}
-                        </td>
-                      ) : (
-                        <td style={{ fontWeight: 500 }}>{p.name}</td>
-                      )}
+                        {isEditing ? (
+                          <td>
+                            <input
+                              type="text"
+                              className="form-control form-control-sm"
+                              value={editSenderName}
+                              onChange={e => setEditSenderName(e.target.value)}
+                              style={{ padding: '0.35rem 0.6rem' }}
+                              placeholder="Sender Name"
+                            />
+                          </td>
+                        ) : (
+                          <td style={{ fontWeight: 500, color: 'var(--text-muted)' }}>{p.senderName?.trim() || '--'}</td>
+                        )}
 
-                      {isEditing ? (
-                        <td>
-                          <input
-                            type="number"
-                            step="any"
-                            className="form-control form-control-sm"
-                            value={editQuantity}
-                            onChange={e => setEditQuantity(e.target.value)}
-                            style={{ padding: '0.35rem 0.6rem' }}
-                          />
-                        </td>
-                      ) : (
-                        <td style={{ fontWeight: 600, color: isLowStock ? 'var(--danger)' : 'var(--text-main)' }}>
-                          {p.quantity} {isLowStock && <span style={{ fontSize: '0.72rem', fontWeight: 600, marginLeft: '0.3rem' }}>(Low Stock)</span>}
-                        </td>
-                      )}
+                        {isEditing ? (
+                          <td>
+                            <input
+                              type="text"
+                              className="form-control form-control-sm"
+                              value={editName}
+                              onChange={e => setEditName(e.target.value)}
+                              style={{ padding: '0.35rem 0.6rem' }}
+                              placeholder="Product Name"
+                            />
+                            {editError && <div style={{ color: 'var(--danger)', fontSize: '0.72rem', marginTop: '0.2rem' }}>{editError}</div>}
+                          </td>
+                        ) : (
+                          <td style={{ fontWeight: 500 }}>{p.name}</td>
+                        )}
 
-                      {isAdmin && (
-                        <td>
-                          {isEditing ? (
-                            <div style={{ display: 'flex', gap: '0.3rem' }}>
-                              <button 
-                                className="btn btn-success btn-sm" 
-                                onClick={() => saveEdit(p.id)}
-                              >
-                                💾 Save
-                              </button>
-                              <button 
-                                className="btn btn-secondary btn-sm" 
-                                onClick={cancelEdit}
-                              >
-                                ❌ Cancel
-                              </button>
-                            </div>
-                          ) : (
-                            <div style={{ display: 'flex', gap: '0.3rem' }}>
-                              <button 
-                                className="btn btn-secondary btn-sm" 
-                                onClick={() => startEdit(p)}
-                              >
-                                ✏️ Edit
-                              </button>
-                              <button 
-                                className="btn btn-danger btn-sm" 
-                                onClick={() => { if(window.confirm('Delete this product?')) onDeleteProduct(p.id); }}
-                              >
-                                🗑️ Delete
-                              </button>
-                            </div>
-                          )}
-                        </td>
-                      )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <Pagination
-            currentPage={activePage}
-            totalEntries={filteredProducts.length}
-            pageSize={10}
-            onPageChange={setCurrentPage}
-          />
-        </>
-      )}
+                        {isEditing ? (
+                          <td>
+                            <input
+                              type="number"
+                              step="any"
+                              className="form-control form-control-sm"
+                              value={editQuantity}
+                              onChange={e => setEditQuantity(e.target.value)}
+                              style={{ padding: '0.35rem 0.6rem' }}
+                            />
+                          </td>
+                        ) : (
+                          <td style={{ fontWeight: 600, color: isLowStock ? 'var(--danger)' : 'var(--text-main)' }}>
+                            {p.quantity} {isLowStock && <span style={{ fontSize: '0.72rem', fontWeight: 600, marginLeft: '0.3rem' }}>(Low Stock)</span>}
+                          </td>
+                        )}
+
+                        {isAdmin && (
+                          <td>
+                            {isEditing ? (
+                              <div style={{ display: 'flex', gap: '0.3rem' }}>
+                                <button
+                                  className="btn btn-success btn-sm"
+                                  onClick={() => saveEdit(p.id)}
+                                >
+                                  💾 Save
+                                </button>
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={cancelEdit}
+                                >
+                                  ❌ Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', gap: '0.3rem' }}>
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => startEdit(p)}
+                                >
+                                  ✏️ Edit
+                                </button>
+                                <button
+                                  className="btn btn-danger btn-sm"
+                                  onClick={() => { if (window.confirm('Delete this product?')) onDeleteProduct(p.id); }}
+                                >
+                                  🗑️ Delete
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <Pagination
+              currentPage={activePage}
+              totalEntries={filteredProducts.length}
+              pageSize={10}
+              onPageChange={setCurrentPage}
+            />
+          </>
+        )}
       </div>
     </div>
   );
